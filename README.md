@@ -83,8 +83,7 @@ The Savitzky-Golay filter works by fitting a polynomial through a sliding window
 
 While Kalman filters are excellent for real-time smoothing, they require velocity as an independent measurement. In GPS tracking, instantaneous velocity is derived from position changes, creating a circular dependency. Savitzky-Golay avoids this by smoothing positions directly without modeling velocity.
 
-## Architecture
+## Documentation
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions and module structure.
-
-See [SPEC.md](SPEC.md) for feature specifications.
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions and module structure.
+- See [SPEC.md](SPEC.md) for feature specifications.
