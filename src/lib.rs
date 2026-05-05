@@ -2,8 +2,10 @@ use chrono::{DateTime, Utc};
 use std::num::NonZeroU32;
 use thiserror::Error;
 
+pub mod config;
 pub mod csv;
 pub mod gpx;
+pub mod power;
 pub mod smoothing;
 
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +103,12 @@ pub enum GpsAnalyzerError {
 
     #[error("Parsing error: {0}")]
     ParseError(String),
+
+    #[error("Config error: {0}")]
+    ConfigError(String),
+
+    #[error("Bike '{0}' not found in config")]
+    BikeNotFound(String),
 }
 
 #[cfg(test)]

@@ -13,6 +13,8 @@ pub struct Cli {
 pub enum Commands {
     /// Smooth GPS drift using Savitzky-Golay filter
     Smooth(SmoothCommand),
+    /// Estimate power output from a GPX file
+    Power(PowerCommand),
 }
 
 #[derive(Parser)]
@@ -41,8 +43,46 @@ impl SmoothCommand {
     pub fn output_path(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
             let input_stem = self.input.file_stem().unwrap().to_string_lossy();
-            let output_name = format!("{}.smoothed.csv", input_stem);
-            PathBuf::from(output_name)
+            PathBuf::from(format!("{}.smoothed.csv", input_stem))
+        })
+    }
+}
+
+#[derive(Parser)]
+pub struct PowerCommand {
+    /// Input GPX file
+    pub input: PathBuf,
+
+    /// Rider weight in kg
+    #[arg(long)]
+    pub rider_weight: f64,
+
+    /// Bike weight in kg
+    #[arg(long, default_value = "10.0")]
+    pub bike_weight: f64,
+
+    /// Bike name from config (e.g. road, gravel, mountain, hybrid)
+    #[arg(long)]
+    pub bike: String,
+
+    /// Path to config file (default: platform config dir)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Output CSV file
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+}
+
+impl PowerCommand {
+    pub fn output_path(&self) -> PathBuf {
+        self.output.clone().unwrap_or_else(|| {
+            let input_stem = self.input.file_stem().unwrap().to_string_lossy();
+            PathBuf::from(format!("{}.power.csv", input_stem))
         })
     }
 }

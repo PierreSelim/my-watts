@@ -1,3 +1,4 @@
+use crate::power::PowerPoint;
 use crate::{GpsAnalyzerError, Track};
 use csv::Writer;
 use serde::Serialize;
@@ -26,6 +27,40 @@ pub fn write_csv<P: AsRef<Path>>(track: &Track, path: P) -> Result<(), GpsAnalyz
             timestamp: point.timestamp.to_rfc3339(),
         };
 
+        writer
+            .serialize(record)
+            .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
+    }
+
+    writer
+        .flush()
+        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct PowerCsvRecord {
+    timestamp: String,
+    power_watts: f64,
+    speed_kmh: f64,
+    gradient_pct: f64,
+}
+
+pub fn write_power_csv<P: AsRef<Path>>(
+    points: &[PowerPoint],
+    path: P,
+) -> Result<(), GpsAnalyzerError> {
+    let file = File::create(path)?;
+    let mut writer = Writer::from_writer(file);
+
+    for point in points {
+        let record = PowerCsvRecord {
+            timestamp: point.timestamp.to_rfc3339(),
+            power_watts: (point.power_watts * 10.0).round() / 10.0,
+            speed_kmh: (point.speed_ms * 3.6 * 10.0).round() / 10.0,
+            gradient_pct: (point.gradient * 1000.0).round() / 10.0,
+        };
         writer
             .serialize(record)
             .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
