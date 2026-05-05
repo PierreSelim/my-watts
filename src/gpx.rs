@@ -69,6 +69,8 @@ pub fn parse_gpx(content: &str) -> Result<Track, GpsAnalyzerError> {
         }
     }
 
+    points.dedup_by_key(|p| p.timestamp);
+
     Track::new(points)
 }
 
@@ -123,5 +125,33 @@ mod tests {
     fn test_parse_gpx_invalid() {
         let gpx_content = "not xml";
         assert!(parse_gpx(gpx_content).is_err());
+    }
+
+    #[test]
+    fn test_parse_gpx_deduplicates_consecutive_same_timestamp() {
+        let gpx_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1">
+    <trk>
+        <trkseg>
+            <trkpt lat="40.0" lon="-120.0">
+                <ele>100.0</ele>
+                <time>2026-04-27T10:00:00Z</time>
+            </trkpt>
+            <trkpt lat="40.05" lon="-120.05">
+                <ele>102.0</ele>
+                <time>2026-04-27T10:00:00Z</time>
+            </trkpt>
+            <trkpt lat="40.1" lon="-120.1">
+                <ele>105.0</ele>
+                <time>2026-04-27T10:01:00Z</time>
+            </trkpt>
+        </trkseg>
+    </trk>
+</gpx>"#;
+
+        let track = parse_gpx(gpx_content).expect("Failed to parse GPX");
+        assert_eq!(track.len(), 2);
+        assert_eq!(track.points[0].lat, 40.0);
+        assert_eq!(track.points[1].lat, 40.1);
     }
 }
