@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use std::num::NonZeroU32;
 use thiserror::Error;
 
+pub mod analyze;
 pub mod config;
 pub mod csv;
 pub mod gpx;
@@ -73,6 +74,32 @@ impl SavitzkyGolayConfig {
             polynomial_degree,
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalyzePoint {
+    pub timestamp: DateTime<Utc>,
+    pub seconds_from_start: f64,
+    pub moving_seconds_from_start: f64,
+    pub raw_lat: f64,
+    pub raw_lon: f64,
+    pub smoothed_lat: f64,
+    pub smoothed_lon: f64,
+    pub instant_speed_kmh: f64,
+    pub average_speed_kmh: f64,
+    pub distance_km: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct IntervalSummary {
+    pub interval_type: String,
+    pub interval_index: usize,
+    pub start_timestamp: DateTime<Utc>,
+    pub end_timestamp: DateTime<Utc>,
+    pub duration_seconds: f64,
+    pub distance_km: f64,
+    pub average_speed_kmh: f64,
+    pub average_power_watts: Option<f64>,
 }
 
 #[derive(Error, Debug)]

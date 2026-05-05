@@ -5,8 +5,9 @@ A Rust tool to analyze and correct GPS drift in GPX files from bike tracking app
 ## Features
 
 - **GPS Drift Correction**: Uses Savitzky-Golay polynomial smoothing to reduce GPS noise while preserving route features
-- **Flexible Configuration**: Tunable window size and polynomial degree for smoothing
-- **CSV Output**: Exports smoothed coordinates for analysis
+- **Power Estimation**: Estimates cycling power output from physics (gravity, rolling resistance, air drag)
+- **Ride Analysis**: Produces enriched per-point metrics and interval summaries at multiple time/distance windows
+- **Flexible Configuration**: Tunable smoothing, bike presets, and per-user defaults in `config.toml`
 
 ## Building
 
@@ -22,27 +23,112 @@ cargo build --release
 cargo run --release -- smooth <INPUT.gpx> [OPTIONS]
 ```
 
-#### Options
+Options:
 
 - `-o, --output <FILE>`: Output CSV file (default: `input.smoothed.csv`)
 - `--window-size <N>`: Savitzky-Golay window size, must be odd (default: 5)
 - `--degree <N>`: Polynomial degree for smoothing (default: 2)
 - `-v, --verbose`: Enable verbose output
 
-#### Example
+Example:
 
 ```bash
-cargo run --release -- smooth my_ride.gpx -o smoothed.csv --window-size 5 --degree 2 -v
+cargo run --release -- smooth my_ride.gpx --window-size 5 --degree 2 -v
 ```
 
-## Output Format
+### Estimate power output from a GPX file
 
-The tool outputs a CSV file with the following columns:
+```bash
+cargo run --release -- power <INPUT.gpx> --rider-weight <KG> --bike <NAME> [OPTIONS]
+```
 
-- `latitude`: Smoothed latitude in decimal degrees
-- `longitude`: Smoothed longitude in decimal degrees
-- `altitude`: Smoothed altitude in meters (empty if not in source)
-- `timestamp`: Original timestamp (ISO 8601 format, not smoothed)
+Options:
+
+- `--rider-weight <KG>`: Rider weight in kg (required)
+- `--bike <NAME>`: Bike preset — `road`, `gravel`, `mountain`, `hybrid` (required)
+- `--bike-weight <KG>`: Bike weight in kg (default: 10.0)
+- `--config <FILE>`: Path to `config.toml`
+- `-o, --output <FILE>`: Output CSV file (default: `input.power.csv`)
+- `-v, --verbose`: Enable verbose output
+
+Example:
+
+```bash
+cargo run --release -- power my_ride.gpx --rider-weight 72 --bike gravel -v
+```
+
+### Analyze a GPX file (enriched CSV + interval summaries)
+
+```bash
+cargo run --release -- analyze <INPUT.gpx> [OPTIONS]
+```
+
+Produces two output files:
+
+- `input.analyze.csv` — one row per GPS point with smoothed coordinates, speed, and cumulative distance
+- `input.intervals.csv` — aggregated stats at 7 interval sizes (1/5/10/30 min and 1/5/10 km)
+
+Options:
+
+- `--rider-weight <KG>`: Rider weight in kg (default: 75.0 or value from `config.toml`)
+- `--bike <NAME>`: Bike preset (default: `road` or value from `config.toml`)
+- `--bike-weight <KG>`: Bike weight in kg (default: 10.0)
+- `--window-size <N>`: Savitzky-Golay window size, must be odd (default: 5)
+- `--degree <N>`: Polynomial degree for smoothing (default: 2)
+- `--config <FILE>`: Path to `config.toml`
+- `-o, --output <FILE>`: Override the per-point CSV path
+- `-v, --verbose`: Print ride summary (distance, avg speed, avg power)
+
+Example:
+
+```bash
+cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel -v
+```
+
+## Output Formats
+
+### `smooth` — `input.smoothed.csv`
+
+| Column | Description |
+|--------|-------------|
+| `latitude` | Smoothed latitude (decimal degrees) |
+| `longitude` | Smoothed longitude (decimal degrees) |
+| `altitude` | Smoothed altitude in metres (empty if absent) |
+| `timestamp` | Original timestamp (ISO 8601, not smoothed) |
+
+### `power` — `input.power.csv`
+
+| Column | Description |
+|--------|-------------|
+| `timestamp` | ISO 8601 timestamp |
+| `power_watts` | Estimated power (W, rounded to 0.1) |
+| `speed_kmh` | Speed (km/h, rounded to 0.1) |
+| `gradient_pct` | Gradient percentage (rounded to 0.1) |
+
+### `analyze` — `input.analyze.csv`
+
+| Column | Description |
+|--------|-------------|
+| `timestamp` | ISO 8601 timestamp |
+| `seconds_from_start` | Elapsed seconds from first point |
+| `raw_lat`, `raw_lon` | Original GPS coordinates |
+| `smoothed_lat`, `smoothed_lon` | Savitzky-Golay smoothed coordinates |
+| `instant_speed_kmh` | Speed since previous point (km/h) |
+| `average_speed_kmh` | Cumulative average speed since start (km/h) |
+| `distance_km` | Cumulative distance using smoothed coords (km) |
+
+### `analyze` — `input.intervals.csv`
+
+| Column | Description |
+|--------|-------------|
+| `interval_type` | `1min`, `5min`, `10min`, `30min`, `1km`, `5km`, `10km` |
+| `interval_index` | 0-based bucket index within this interval type |
+| `start_timestamp` | ISO 8601 start of interval |
+| `end_timestamp` | ISO 8601 end of interval |
+| `duration_seconds` | Duration of interval |
+| `distance_km` | Distance covered in interval |
+| `average_speed_kmh` | Average speed in interval |
+| `average_power_watts` | Average power in interval (empty if no power config) |
 
 ## Testing
 

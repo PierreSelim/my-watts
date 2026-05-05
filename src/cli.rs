@@ -15,6 +15,8 @@ pub enum Commands {
     Smooth(SmoothCommand),
     /// Estimate power output from a GPX file
     Power(PowerCommand),
+    /// Produce enriched per-point CSV and interval summary CSV from a GPX file
+    Analyze(AnalyzeCommand),
 }
 
 #[derive(Parser)]
@@ -84,5 +86,57 @@ impl PowerCommand {
             let input_stem = self.input.file_stem().unwrap().to_string_lossy();
             PathBuf::from(format!("{}.power.csv", input_stem))
         })
+    }
+}
+
+#[derive(Parser)]
+pub struct AnalyzeCommand {
+    /// Input GPX file
+    pub input: PathBuf,
+
+    /// Output CSV file for per-point data
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Savitzky-Golay window size (must be odd, default: 5)
+    #[arg(long, default_value = "5")]
+    pub window_size: u32,
+
+    /// Polynomial degree for smoothing (default: 2)
+    #[arg(long, default_value = "2")]
+    pub degree: u32,
+
+    /// Rider weight in kg (overrides config default of 75 kg)
+    #[arg(long)]
+    pub rider_weight: Option<f64>,
+
+    /// Bike weight in kg (default: 10.0)
+    #[arg(long, default_value = "10.0")]
+    pub bike_weight: f64,
+
+    /// Bike name from config (overrides config default of "road")
+    #[arg(long)]
+    pub bike: Option<String>,
+
+    /// Path to config file (default: platform config dir)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+}
+
+impl AnalyzeCommand {
+    pub fn analyze_output_path(&self) -> PathBuf {
+        self.output.clone().unwrap_or_else(|| {
+            let input_stem = self.input.file_stem().unwrap().to_string_lossy();
+            PathBuf::from(format!("{}.analyze.csv", input_stem))
+        })
+    }
+
+    pub fn intervals_output_path(&self) -> PathBuf {
+        let input_stem = self.input.file_stem().unwrap().to_string_lossy();
+        PathBuf::from(format!("{}.intervals.csv", input_stem))
     }
 }

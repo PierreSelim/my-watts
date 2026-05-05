@@ -1,5 +1,5 @@
 use crate::power::PowerPoint;
-use crate::{GpsAnalyzerError, Track};
+use crate::{AnalyzePoint, GpsAnalyzerError, IntervalSummary, Track};
 use csv::Writer;
 use serde::Serialize;
 use std::fs::File;
@@ -73,6 +73,95 @@ pub fn write_power_csv<P: AsRef<Path>>(
     Ok(())
 }
 
+#[derive(Serialize)]
+struct AnalyzeCsvRecord {
+    timestamp: String,
+    seconds_from_start: f64,
+    raw_lat: f64,
+    raw_lon: f64,
+    smoothed_lat: f64,
+    smoothed_lon: f64,
+    instant_speed_kmh: f64,
+    average_speed_kmh: f64,
+    distance_km: f64,
+}
+
+pub fn write_analyze_csv<P: AsRef<Path>>(
+    points: &[AnalyzePoint],
+    path: P,
+) -> Result<(), GpsAnalyzerError> {
+    let file = File::create(path)?;
+    let mut writer = Writer::from_writer(file);
+
+    for point in points {
+        let record = AnalyzeCsvRecord {
+            timestamp: point.timestamp.to_rfc3339(),
+            seconds_from_start: (point.seconds_from_start * 100.0).round() / 100.0,
+            raw_lat: point.raw_lat,
+            raw_lon: point.raw_lon,
+            smoothed_lat: point.smoothed_lat,
+            smoothed_lon: point.smoothed_lon,
+            instant_speed_kmh: (point.instant_speed_kmh * 10.0).round() / 10.0,
+            average_speed_kmh: (point.average_speed_kmh * 10.0).round() / 10.0,
+            distance_km: (point.distance_km * 1000.0).round() / 1000.0,
+        };
+        writer
+            .serialize(record)
+            .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
+    }
+
+    writer
+        .flush()
+        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct IntervalCsvRecord {
+    interval_type: String,
+    interval_index: usize,
+    start_timestamp: String,
+    end_timestamp: String,
+    duration_seconds: f64,
+    distance_km: f64,
+    average_speed_kmh: f64,
+    average_power_watts: String,
+}
+
+pub fn write_intervals_csv<P: AsRef<Path>>(
+    intervals: &[IntervalSummary],
+    path: P,
+) -> Result<(), GpsAnalyzerError> {
+    let file = File::create(path)?;
+    let mut writer = Writer::from_writer(file);
+
+    for interval in intervals {
+        let record = IntervalCsvRecord {
+            interval_type: interval.interval_type.clone(),
+            interval_index: interval.interval_index,
+            start_timestamp: interval.start_timestamp.to_rfc3339(),
+            end_timestamp: interval.end_timestamp.to_rfc3339(),
+            duration_seconds: (interval.duration_seconds * 10.0).round() / 10.0,
+            distance_km: (interval.distance_km * 1000.0).round() / 1000.0,
+            average_speed_kmh: (interval.average_speed_kmh * 10.0).round() / 10.0,
+            average_power_watts: interval
+                .average_power_watts
+                .map(|w| format!("{:.1}", w))
+                .unwrap_or_default(),
+        };
+        writer
+            .serialize(record)
+            .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
+    }
+
+    writer
+        .flush()
+        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +195,139 @@ mod tests {
         let content = fs::read_to_string(&path).expect("Failed to read CSV");
         assert!(content.contains("40"));
         assert!(content.contains("-120"));
+    }
+
+    fn make_analyze_point(seconds: f64, distance_km: f64) -> AnalyzePoint {
+        AnalyzePoint {
+            timestamp: Utc::now(),
+            seconds_from_start: seconds,
+            moving_seconds_from_start: seconds,
+            raw_lat: 48.0,
+            raw_lon: 2.0,
+            smoothed_lat: 48.0001,
+            smoothed_lon: 2.0001,
+            instant_speed_kmh: 30.0,
+            average_speed_kmh: 28.0,
+            distance_km,
+        }
+    }
+
+    #[test]
+    fn test_write_analyze_csv_row_and_column_count() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let points = vec![
+            make_analyze_point(0.0, 0.0),
+            make_analyze_point(10.0, 0.083),
+        ];
+        write_analyze_csv(&points, temp_file.path()).unwrap();
+
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3, "header + 2 data rows");
+        assert_eq!(lines[0].split(',').count(), 9, "9 columns in header");
+    }
+
+    #[test]
+    fn test_write_analyze_csv_values_present() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let points = vec![make_analyze_point(0.0, 0.0)];
+        write_analyze_csv(&points, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("48"));
+        assert!(content.contains("0.0"));
+    }
+
+    #[test]
+    fn test_write_intervals_csv_column_count() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let intervals = vec![IntervalSummary {
+            interval_type: "1min".to_string(),
+            interval_index: 0,
+            start_timestamp: Utc::now(),
+            end_timestamp: Utc::now(),
+            duration_seconds: 60.0,
+            distance_km: 0.5,
+            average_speed_kmh: 30.0,
+            average_power_watts: Some(200.0),
+        }];
+        write_intervals_csv(&intervals, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "header + 1 data row");
+        assert_eq!(lines[0].split(',').count(), 8, "8 columns in header");
+    }
+
+    #[test]
+    fn test_write_intervals_csv_power_some() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let intervals = vec![IntervalSummary {
+            interval_type: "5km".to_string(),
+            interval_index: 2,
+            start_timestamp: Utc::now(),
+            end_timestamp: Utc::now(),
+            duration_seconds: 600.0,
+            distance_km: 5.0,
+            average_speed_kmh: 30.0,
+            average_power_watts: Some(250.0),
+        }];
+        write_intervals_csv(&intervals, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        let records: Vec<_> = rdr.records().collect();
+        assert_eq!(records.len(), 1);
+        let record = records[0].as_ref().unwrap();
+        assert_eq!(record.get(0).unwrap(), "5km");
+        assert_eq!(record.get(1).unwrap(), "2");
+        assert_eq!(record.get(7).unwrap(), "250.0");
+    }
+
+    #[test]
+    fn test_write_intervals_csv_power_none_is_empty_field() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let intervals = vec![IntervalSummary {
+            interval_type: "1km".to_string(),
+            interval_index: 0,
+            start_timestamp: Utc::now(),
+            end_timestamp: Utc::now(),
+            duration_seconds: 120.0,
+            distance_km: 1.0,
+            average_speed_kmh: 30.0,
+            average_power_watts: None,
+        }];
+        write_intervals_csv(&intervals, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        let records: Vec<_> = rdr.records().collect();
+        let record = records[0].as_ref().unwrap();
+        assert_eq!(
+            record.get(7).unwrap(),
+            "",
+            "power column should be empty when None"
+        );
+    }
+
+    #[test]
+    fn test_write_intervals_csv_all_seven_types() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let types = ["1min", "5min", "10min", "30min", "1km", "5km", "10km"];
+        let intervals: Vec<IntervalSummary> = types
+            .iter()
+            .enumerate()
+            .map(|(i, t)| IntervalSummary {
+                interval_type: t.to_string(),
+                interval_index: i,
+                start_timestamp: Utc::now(),
+                end_timestamp: Utc::now(),
+                duration_seconds: 60.0,
+                distance_km: 1.0,
+                average_speed_kmh: 60.0,
+                average_power_watts: None,
+            })
+            .collect();
+        write_intervals_csv(&intervals, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        for t in &types {
+            assert!(content.contains(t), "missing interval type {t}");
+        }
     }
 }

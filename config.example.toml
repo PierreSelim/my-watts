@@ -1,0 +1,36 @@
+# my-watts configuration file
+#
+# Default location:
+#   Windows : %APPDATA%\my-watts\config.toml
+#   Linux/macOS: ~/.config/my-watts/config.toml
+#
+# Copy this file to the default location and edit as needed.
+
+default_rider_weight_kg = 75.0
+default_bike = "road"
+
+[[bikes]]
+name = "road"
+crr = 0.004
+cda = 0.32
+# Speed threshold below which the rider is considered stopped (km/h).
+# Stops are excluded from average speed and average power calculations.
+moving_speed_threshold_kmh = 3.0
+
+[[bikes]]
+name = "gravel"
+crr = 0.006
+cda = 0.40
+moving_speed_threshold_kmh = 3.0
+
+[[bikes]]
+name = "mountain"
+crr = 0.012
+cda = 0.57
+moving_speed_threshold_kmh = 3.0
+
+[[bikes]]
+name = "hybrid"
+crr = 0.008
+cda = 0.46
+moving_speed_threshold_kmh = 3.0

@@ -164,7 +164,107 @@ timestamp,power_watts,speed_kmh,gradient_pct
 
 ---
 
-## Feature 3: Segment-Based Power Analysis
+## Feature 3: Ride Analysis
+
+### Problem
+
+The `smooth` and `power` commands produce separate outputs, and neither provides a combined view of a ride's key metrics at a glance. Riders want a single enriched dataset that includes both raw and smoothed coordinates, instant and average speed, cumulative distance, and aggregated summaries across standard time and distance windows.
+
+### Solution
+
+The `analyze` command processes a GPX file in one pass: it smooths the track, computes per-point metrics, estimates power, and groups results into interval buckets at 7 predefined window sizes (1/5/10/30 min and 1/5/10 km). It writes two CSV files and prints a one-line ride summary.
+
+### CLI Interface
+
+```
+my-watts analyze <INPUT> [OPTIONS]
+
+Arguments:
+  INPUT                       GPX file to analyse
+
+Options:
+  -o, --output <FILE>         Output CSV for per-point data (default: input.analyze.csv)
+  --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
+  --degree <N>                Polynomial degree for smoothing (default: 2)
+  --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
+  --bike-weight <KG>          Bike weight in kg (default: 10.0)
+  --bike <NAME>               Bike preset name (default: config or "road")
+  --config <FILE>             Path to config.toml (default: platform config dir)
+  -v, --verbose               Enable verbose output
+  -h, --help                  Print help
+```
+
+The intervals output path is always `{INPUT_STEM}.intervals.csv` and cannot be overridden separately.
+
+### Configuration Defaults
+
+`config.toml` may contain two new optional fields that set the defaults for `--rider-weight` and `--bike` when those flags are omitted:
+
+```toml
+default_rider_weight_kg = 75.0
+default_bike = "road"
+```
+
+These fields are optional; built-in fallbacks are 75.0 kg and `"road"` respectively.
+
+### Output: `input.analyze.csv`
+
+One row per GPS point, in track order:
+
+| Column | Description |
+|--------|-------------|
+| `timestamp` | ISO 8601 timestamp |
+| `seconds_from_start` | Elapsed seconds from first point (rounded to 0.01) |
+| `raw_lat`, `raw_lon` | Original GPS coordinates |
+| `smoothed_lat`, `smoothed_lon` | Savitzky-Golay smoothed coordinates |
+| `instant_speed_kmh` | Speed from previous point in km/h (0.0 for first point, rounded to 0.1) |
+| `average_speed_kmh` | Cumulative average speed since start in km/h (0.0 for first point, rounded to 0.1) |
+| `distance_km` | Cumulative distance using smoothed coords in km (rounded to 0.001) |
+
+### Output: `input.intervals.csv`
+
+All 7 interval types stacked in one file, ordered by type then bucket index:
+
+| Column | Description |
+|--------|-------------|
+| `interval_type` | `1min`, `5min`, `10min`, `30min`, `1km`, `5km`, `10km` |
+| `interval_index` | 0-based bucket index (floor division of elapsed time or distance) |
+| `start_timestamp` | ISO 8601 timestamp of first point in bucket |
+| `end_timestamp` | ISO 8601 timestamp of last point in bucket |
+| `duration_seconds` | `end - start` in seconds (rounded to 0.1) |
+| `distance_km` | `last.distance_km - first.distance_km` in bucket (rounded to 0.001) |
+| `average_speed_kmh` | `distance_km / (duration_seconds / 3600)`, 0.0 if single-point bucket (rounded to 0.1) |
+| `average_power_watts` | Mean of power_watts for all power points within `[start_timestamp, end_timestamp]`; empty string if not computed (rounded to 0.1) |
+
+Bucket assignment:
+- Time-based: `bucket = floor(seconds_from_start / window_secs)`
+- Distance-based: `bucket = floor(distance_km / window_km)`
+
+### Stdout Summary
+
+After writing both files, always printed to stderr:
+
+```
+Distance: X.XX km | Avg speed: X.X km/h | Avg power: X W
+N points → input.analyze.csv
+M interval rows → input.intervals.csv
+```
+
+### Error Handling
+
+- All errors from `smooth` and `power` apply (invalid GPX, window size constraints, bike not found)
+- Track must have at least 2 points (required for power computation)
+
+### Testing
+
+- Unit tests for `compute_analyze_points`: first-point zeroes, monotonic distance, raw/smoothed coord preservation, stationary points, average-speed formula consistency
+- Unit tests for `compute_intervals`: correct bucket counts for all 7 specs, duration/distance sums, power averaging, sequential indices, empty input
+- CSV round-trip tests: column count, power-Some vs power-None serialisation
+- Config tests: serde defaults for new fields, TOML override
+
+---
+
+## Feature 4: Segment-Based Power Analysis
 
 ### Problem
 

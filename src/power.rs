@@ -108,6 +108,7 @@ mod tests {
             name: "road".to_string(),
             crr: 0.004,
             cda: 0.32,
+            moving_speed_threshold_kmh: 3.0,
         }
     }
 
@@ -116,6 +117,7 @@ mod tests {
             name: "gravel".to_string(),
             crr: 0.006,
             cda: 0.40,
+            moving_speed_threshold_kmh: 3.0,
         }
     }
 
