@@ -17,6 +17,8 @@ pub enum Commands {
     Power(PowerCommand),
     /// Produce enriched per-point CSV and interval summary CSV from a GPX file
     Analyze(AnalyzeCommand),
+    /// Interactive terminal plot of power and speed over time
+    Plot(PlotCommand),
 }
 
 #[derive(Parser)]
@@ -139,4 +141,38 @@ impl AnalyzeCommand {
         let input_stem = self.input.file_stem().unwrap().to_string_lossy();
         PathBuf::from(format!("{}.intervals.csv", input_stem))
     }
+}
+
+#[derive(Parser)]
+pub struct PlotCommand {
+    /// Input GPX file
+    pub input: PathBuf,
+
+    /// Savitzky-Golay window size (must be odd, default: 5)
+    #[arg(long, default_value = "5")]
+    pub window_size: u32,
+
+    /// Polynomial degree for smoothing (default: 2)
+    #[arg(long, default_value = "2")]
+    pub degree: u32,
+
+    /// Rider weight in kg (overrides config default of 75 kg)
+    #[arg(long)]
+    pub rider_weight: Option<f64>,
+
+    /// Bike weight in kg (default: 10.0)
+    #[arg(long, default_value = "10.0")]
+    pub bike_weight: f64,
+
+    /// Bike name from config (overrides config default of "road")
+    #[arg(long)]
+    pub bike: Option<String>,
+
+    /// Path to config file (default: platform config dir)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
 }

@@ -529,7 +529,10 @@ mod tests {
         };
         let power_points = compute_power(&track, &power_cfg).unwrap();
         let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
-        assert_eq!(points[0].power_4s_watts, None, "first point has no power within ±2s");
+        assert_eq!(
+            points[0].power_4s_watts, None,
+            "first point has no power within ±2s"
+        );
     }
 
     #[test]
@@ -586,10 +589,16 @@ mod tests {
 
         let w3 = points[3].power_4s_watts.unwrap();
         let expected3 = (1000.0 + 4.0 * 100.0) / 5.0;
-        assert!((w3 - expected3).abs() < 1e-9, "expected {expected3:.4} W at i=3, got {w3}");
+        assert!(
+            (w3 - expected3).abs() < 1e-9,
+            "expected {expected3:.4} W at i=3, got {w3}"
+        );
 
         let w4 = points[4].power_4s_watts.unwrap();
-        assert!((w4 - 100.0).abs() < 1e-9, "spike dropped at i=4, expected 100 W, got {w4}");
+        assert!(
+            (w4 - 100.0).abs() < 1e-9,
+            "spike dropped at i=4, expected 100 W, got {w4}"
+        );
     }
 
     #[test]

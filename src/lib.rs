@@ -8,6 +8,7 @@ pub mod csv;
 pub mod gpx;
 pub mod power;
 pub mod smoothing;
+pub mod tui;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GpsPoint {

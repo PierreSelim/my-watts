@@ -265,7 +265,79 @@ M interval rows → input.intervals.csv
 
 ---
 
-## Feature 4: Segment-Based Power Analysis
+## Feature 4: Interactive Terminal Plot
+
+### Problem
+
+The `analyze` command produces CSV files for external tools, but there is no way to visualise power and speed over time without leaving the terminal or importing data elsewhere.
+
+### Solution
+
+The `plot` command runs the full analysis pipeline and renders an interactive ratatui chart in the terminal. It shows three time-series simultaneously: 4-second rolling average power, instant speed, and cumulative average speed. The user presses `q` or `Esc` to exit and return to the shell.
+
+### CLI Interface
+
+```
+my-watts plot <INPUT> [OPTIONS]
+
+Arguments:
+  INPUT                       GPX file to analyse
+
+Options:
+  --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
+  --degree <N>                Polynomial degree for smoothing (default: 2)
+  --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
+  --bike-weight <KG>          Bike weight in kg (default: 10.0)
+  --bike <NAME>               Bike preset name (default: config or "road")
+  --config <FILE>             Path to config.toml (default: platform config dir)
+  -v, --verbose               Enable verbose output
+  -h, --help                  Print help
+```
+
+No output files are written.
+
+### Display Layout
+
+Two chart panels stacked vertically, with a one-line status bar below:
+
+```
+┌─────────────────────────────────────────┐
+│  Power (W)  — yellow braille line       │  ~57% of height
+├─────────────────────────────────────────┤
+│  Speed (km/h)                           │  ~40% of height
+│    cyan  = instant speed                │
+│    green = cumulative average speed     │
+├─────────────────────────────────────────┤
+│  Dist | Elapsed | Moving | Avg speed | Avg power | [q] quit  │
+└─────────────────────────────────────────┘
+```
+
+- X axis: elapsed time in `HH:MM:SS`, three labels (start / midpoint / end)
+- Y axis (power): rounded up to the nearest 50 W
+- Y axis (speed): rounded up to the nearest 5 km/h
+- Power values where no 4-second window exists are rendered as 0 W
+
+### Interaction
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `Esc` | Quit |
+
+The terminal is always restored to its original state on exit, including on I/O errors.
+
+### Error Handling
+
+All errors from `analyze` apply (invalid GPX, window size constraints, bike not found).
+
+### Testing
+
+- Unit tests for `build_plot_data`: series length, x-values, `None` power → 0.0, `Some` power preserved, time bounds, average power computation (including all-`None` case), empty input
+- Unit tests for `compute_y_bounds`: rounding up to next step, exact multiples, all-zero series, lower bound always 0.0
+
+---
+
+## Feature 5: Segment-Based Power Analysis
 
 ### Problem
 
