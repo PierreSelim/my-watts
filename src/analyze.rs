@@ -54,7 +54,8 @@ pub fn analyze_track(
     moving_speed_threshold_kmh: f64,
 ) -> (Vec<AnalyzePoint>, Vec<IntervalSummary>) {
     debug_assert_eq!(raw.len(), smoothed.len());
-    let analyze_points = compute_analyze_points(raw, smoothed, moving_speed_threshold_kmh);
+    let analyze_points =
+        compute_analyze_points(raw, smoothed, power_points, moving_speed_threshold_kmh);
     let intervals = compute_intervals(&analyze_points, power_points, moving_speed_threshold_kmh);
     (analyze_points, intervals)
 }
@@ -62,6 +63,7 @@ pub fn analyze_track(
 fn compute_analyze_points(
     raw: &Track,
     smoothed: &Track,
+    power_points: Option<&[PowerPoint]>,
     moving_speed_threshold_kmh: f64,
 ) -> Vec<AnalyzePoint> {
     if smoothed.is_empty() {
@@ -70,6 +72,10 @@ fn compute_analyze_points(
     let first_ts = smoothed.points[0].timestamp;
     let mut cumulative_distance_km = 0.0;
     let mut moving_seconds = 0.0;
+    let mut cumulative_energy_kj = 0.0;
+    let mut power_idx = 0;
+    let mut centered_window_start = 0usize;
+    let mut centered_window_end = 0usize;
     let mut result = Vec::with_capacity(raw.len());
 
     for (i, (raw_pt, smooth_pt)) in raw.points.iter().zip(smoothed.points.iter()).enumerate() {
@@ -93,10 +99,52 @@ fn compute_analyze_points(
             moving_seconds += dt;
         }
 
+        // Consume power points up to this timestamp and accumulate energy (W × s / 1000 = kJ).
+        // power_points[j].timestamp == smoothed.points[j+1].timestamp, so the first power point
+        // is reached when i == 1, with seg_dt = time between point 0 and point 1.
+        if let Some(pp) = power_points {
+            while power_idx < pp.len() && pp[power_idx].timestamp <= smooth_pt.timestamp {
+                let seg_dt = if power_idx == 0 {
+                    (pp[0].timestamp - first_ts).num_milliseconds() as f64 / 1000.0
+                } else {
+                    (pp[power_idx].timestamp - pp[power_idx - 1].timestamp).num_milliseconds()
+                        as f64
+                        / 1000.0
+                };
+                cumulative_energy_kj += pp[power_idx].power_watts * seg_dt / 1000.0;
+                power_idx += 1;
+            }
+        }
+
         let average_speed_kmh = if moving_seconds > 0.0 {
             cumulative_distance_km / (moving_seconds / 3600.0)
         } else {
             0.0
+        };
+
+        let power_4s_watts: Option<f64> = if let Some(pp) = power_points {
+            let half_window_ms = 2_000i64;
+            while centered_window_end < pp.len()
+                && (pp[centered_window_end].timestamp - smooth_pt.timestamp).num_milliseconds()
+                    <= half_window_ms
+            {
+                centered_window_end += 1;
+            }
+            while centered_window_start < centered_window_end
+                && (smooth_pt.timestamp - pp[centered_window_start].timestamp).num_milliseconds()
+                    > half_window_ms
+            {
+                centered_window_start += 1;
+            }
+            if centered_window_start >= centered_window_end {
+                None
+            } else {
+                let slice = &pp[centered_window_start..centered_window_end];
+                let sum: f64 = slice.iter().map(|p| p.power_watts).sum();
+                Some(sum / slice.len() as f64)
+            }
+        } else {
+            None
         };
 
         result.push(AnalyzePoint {
@@ -110,6 +158,8 @@ fn compute_analyze_points(
             instant_speed_kmh,
             average_speed_kmh,
             distance_km: cumulative_distance_km,
+            power_4s_watts,
+            cumulative_energy_kj: power_points.map(|_| cumulative_energy_kj),
         });
     }
 
@@ -215,6 +265,8 @@ mod tests {
             instant_speed_kmh: 30.0,
             average_speed_kmh: 0.0,
             distance_km,
+            power_4s_watts: None,
+            cumulative_energy_kj: None,
         }
     }
 
@@ -325,6 +377,13 @@ mod tests {
     }
 
     #[test]
+    fn test_no_power_gives_none_energy_in_all_points() {
+        let track = make_moving_track(5, 10);
+        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        assert!(points.iter().all(|p| p.cumulative_energy_kj.is_none()));
+    }
+
+    #[test]
     fn test_with_power_gives_some_in_all_intervals() {
         use crate::config::BikeConfig;
         use crate::power::{compute_power, PowerConfig};
@@ -342,6 +401,202 @@ mod tests {
         let power_points = compute_power(&track, &power_cfg).unwrap();
         let (_, intervals) = analyze_track(&track, &track, Some(&power_points), 3.0);
         assert!(intervals.iter().all(|s| s.average_power_watts.is_some()));
+    }
+
+    #[test]
+    fn test_energy_is_zero_at_first_point() {
+        use crate::config::BikeConfig;
+        use crate::power::{compute_power, PowerConfig};
+        let track = make_moving_track(5, 10);
+        let power_cfg = PowerConfig {
+            rider_weight_kg: 70.0,
+            bike_weight_kg: 8.0,
+            bike: BikeConfig {
+                name: "road".to_string(),
+                crr: 0.004,
+                cda: 0.32,
+                moving_speed_threshold_kmh: 3.0,
+            },
+        };
+        let power_points = compute_power(&track, &power_cfg).unwrap();
+        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        assert_eq!(points[0].cumulative_energy_kj, Some(0.0));
+    }
+
+    #[test]
+    fn test_energy_is_monotonically_non_decreasing() {
+        use crate::config::BikeConfig;
+        use crate::power::{compute_power, PowerConfig};
+        let track = make_moving_track(10, 10);
+        let power_cfg = PowerConfig {
+            rider_weight_kg: 70.0,
+            bike_weight_kg: 8.0,
+            bike: BikeConfig {
+                name: "road".to_string(),
+                crr: 0.004,
+                cda: 0.32,
+                moving_speed_threshold_kmh: 3.0,
+            },
+        };
+        let power_points = compute_power(&track, &power_cfg).unwrap();
+        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        for w in points.windows(2) {
+            assert!(
+                w[1].cumulative_energy_kj >= w[0].cumulative_energy_kj,
+                "energy must not decrease: {:?} < {:?}",
+                w[1].cumulative_energy_kj,
+                w[0].cumulative_energy_kj
+            );
+        }
+    }
+
+    #[test]
+    fn test_energy_matches_power_times_time() {
+        // Constant-power track: total energy must equal P × t / 1000
+        use crate::power::PowerPoint;
+        let base_ts = 1_700_000_000i64;
+        let n = 5usize;
+        let dt_secs = 10i64;
+        let constant_power = 200.0f64;
+
+        // Build analyze points manually (just need timestamps and distance)
+        let analyze_pts: Vec<AnalyzePoint> = (0..n)
+            .map(|i| make_analyze_point(i as f64 * dt_secs as f64, i as f64 * 0.05))
+            .collect();
+
+        // Build power points: N-1 points, each at t = base + (i+1)*dt, all 200 W
+        let power_pts: Vec<PowerPoint> = (0..(n - 1))
+            .map(|i| PowerPoint {
+                timestamp: DateTime::from_timestamp(base_ts + (i as i64 + 1) * dt_secs, 0).unwrap(),
+                power_watts: constant_power,
+                speed_ms: 5.0,
+                gradient: 0.0,
+            })
+            .collect();
+
+        let intervals = compute_intervals(&analyze_pts, Some(&power_pts), 3.0);
+        // Use analyze_track-style integration to verify via direct call
+        // Instead: construct a minimal track and use analyze_track end-to-end
+        let _ = intervals; // just silence unused warning
+
+        // Direct test: sum energy manually and compare with expected
+        // 4 segments × 200 W × 10 s / 1000 = 8 kJ total
+        let expected_total_kj = (n - 1) as f64 * constant_power * dt_secs as f64 / 1000.0;
+
+        // Re-create using the real track to exercise compute_analyze_points
+        let track_pts: Vec<GpsPoint> = (0..n)
+            .map(|i| make_gps_point(48.8566 + i as f64 * LAT_STEP, 2.3522, i as i64 * dt_secs))
+            .collect();
+        let track = Track::new(track_pts).unwrap();
+
+        // Build matching power points aligned to the smoothed track timestamps
+        let first_ts = track.points[0].timestamp;
+        let aligned_power: Vec<PowerPoint> = (0..(n - 1))
+            .map(|i| PowerPoint {
+                timestamp: track.points[i + 1].timestamp,
+                power_watts: constant_power,
+                speed_ms: 5.0,
+                gradient: 0.0,
+            })
+            .collect();
+
+        let (points, _) = analyze_track(&track, &track, Some(&aligned_power), 3.0);
+        let _ = first_ts;
+        let total_energy = points.last().unwrap().cumulative_energy_kj.unwrap();
+        assert!(
+            (total_energy - expected_total_kj).abs() < 1e-9,
+            "expected {expected_total_kj} kJ, got {total_energy} kJ"
+        );
+    }
+
+    // --- 10-second power window tests ---
+
+    #[test]
+    fn test_power_4s_is_none_at_first_point() {
+        use crate::config::BikeConfig;
+        use crate::power::{compute_power, PowerConfig};
+        // 10-second intervals: the first power point is 10s ahead, outside ±2s window.
+        let track = make_moving_track(5, 10);
+        let power_cfg = PowerConfig {
+            rider_weight_kg: 70.0,
+            bike_weight_kg: 8.0,
+            bike: BikeConfig {
+                name: "road".to_string(),
+                crr: 0.004,
+                cda: 0.32,
+                moving_speed_threshold_kmh: 3.0,
+            },
+        };
+        let power_points = compute_power(&track, &power_cfg).unwrap();
+        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        assert_eq!(points[0].power_4s_watts, None, "first point has no power within ±2s");
+    }
+
+    #[test]
+    fn test_power_4s_constant_power_averages_to_that_power() {
+        use crate::power::PowerPoint;
+        let base_ts = 1_700_000_000i64;
+        let n = 15usize;
+        let track_pts: Vec<GpsPoint> = (0..n)
+            .map(|i| make_gps_point(48.8566 + i as f64 * LAT_STEP, 2.3522, i as i64))
+            .collect();
+        let track = Track::new(track_pts).unwrap();
+        let power_pts: Vec<PowerPoint> = (0..(n - 1))
+            .map(|i| PowerPoint {
+                timestamp: DateTime::from_timestamp(base_ts + i as i64 + 1, 0).unwrap(),
+                power_watts: 200.0,
+                speed_ms: 5.0,
+                gradient: 0.0,
+            })
+            .collect();
+        let (points, _) = analyze_track(&track, &track, Some(&power_pts), 3.0);
+        // Points 0 and 1 have power points within ±2s; all return 200 W.
+        for pt in &points[..] {
+            if let Some(w) = pt.power_4s_watts {
+                assert!((w - 200.0).abs() < 1e-9, "expected 200 W, got {w}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_power_4s_centered_window_drops_spike_outside_2s() {
+        use crate::power::PowerPoint;
+        // Spike at pp[0] (timestamp base_ts+1, 1000 W), rest 100 W.
+        // Spike is in the ±2s centered window of analyze points i=0..=3
+        // (|base_ts+1 - (base_ts+i)| = |1-i| ≤ 2 ⟺ i ≤ 3).
+        // At i=3 (t=base_ts+3): window [base_ts+1, base_ts+5] → pp[0..5]
+        //   = 1000 + 4×100 = 1400 / 5 = 280 W.
+        // At i=4 (t=base_ts+4): window [base_ts+2, base_ts+6] → pp[1..6]
+        //   = 5×100 = 100 W (spike dropped).
+        let base_ts = 1_700_000_000i64;
+        let n = 15usize;
+        let track_pts: Vec<GpsPoint> = (0..n)
+            .map(|i| make_gps_point(48.8566 + i as f64 * LAT_STEP, 2.3522, i as i64))
+            .collect();
+        let track = Track::new(track_pts).unwrap();
+        let power_pts: Vec<PowerPoint> = (0..(n - 1))
+            .map(|i| PowerPoint {
+                timestamp: DateTime::from_timestamp(base_ts + i as i64 + 1, 0).unwrap(),
+                power_watts: if i == 0 { 1000.0 } else { 100.0 },
+                speed_ms: 5.0,
+                gradient: 0.0,
+            })
+            .collect();
+        let (points, _) = analyze_track(&track, &track, Some(&power_pts), 3.0);
+
+        let w3 = points[3].power_4s_watts.unwrap();
+        let expected3 = (1000.0 + 4.0 * 100.0) / 5.0;
+        assert!((w3 - expected3).abs() < 1e-9, "expected {expected3:.4} W at i=3, got {w3}");
+
+        let w4 = points[4].power_4s_watts.unwrap();
+        assert!((w4 - 100.0).abs() < 1e-9, "spike dropped at i=4, expected 100 W, got {w4}");
+    }
+
+    #[test]
+    fn test_power_4s_is_none_without_power_points() {
+        let track = make_moving_track(5, 1);
+        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        assert!(points.iter().all(|p| p.power_4s_watts.is_none()));
     }
 
     // --- compute_intervals tests using direct AnalyzePoint construction ---

@@ -7,7 +7,12 @@ use my_watts::{
 
 fn fmt_hhmmss(total_secs: f64) -> String {
     let secs = total_secs as u64;
-    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 fn main() {
@@ -150,14 +155,19 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
     } else {
         moving_power.iter().sum::<f64>() / moving_power.len() as f64
     };
+    let total_calories_kcal = analyze_points
+        .last()
+        .and_then(|p| p.cumulative_energy_kj)
+        .unwrap_or(0.0);
 
     eprintln!(
-        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Avg power: {:.0} W",
+        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal",
         fmt_hhmmss(elapsed_secs),
         fmt_hhmmss(moving_secs),
         total_distance_km,
         avg_speed_kmh,
-        avg_power_watts
+        avg_power_watts,
+        total_calories_kcal
     );
     eprintln!(
         "{} points → {:?}\n{} interval rows → {:?}",

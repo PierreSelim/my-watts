@@ -220,6 +220,7 @@ One row per GPS point, in track order:
 | `instant_speed_kmh` | Speed from previous point in km/h (0.0 for first point, rounded to 0.1) |
 | `average_speed_kmh` | Cumulative average speed since start in km/h (0.0 for first point, rounded to 0.1) |
 | `distance_km` | Cumulative distance using smoothed coords in km (rounded to 0.001) |
+| `power_4s_watts` | Centered 4-second rolling average power in watts (rounded to 0.1); empty string if no power points fall within ±2 s of the current timestamp |
 
 ### Output: `input.intervals.csv`
 

@@ -84,6 +84,9 @@ struct AnalyzeCsvRecord {
     instant_speed_kmh: f64,
     average_speed_kmh: f64,
     distance_km: f64,
+    power_4s_watts: String,
+    // kJ ≈ kcal: cycling mechanical efficiency ~25% and 1 kcal = 4.184 kJ cancel to ~1:1
+    calories_kcal: String,
 }
 
 pub fn write_analyze_csv<P: AsRef<Path>>(
@@ -104,6 +107,14 @@ pub fn write_analyze_csv<P: AsRef<Path>>(
             instant_speed_kmh: (point.instant_speed_kmh * 10.0).round() / 10.0,
             average_speed_kmh: (point.average_speed_kmh * 10.0).round() / 10.0,
             distance_km: (point.distance_km * 1000.0).round() / 1000.0,
+            power_4s_watts: point
+                .power_4s_watts
+                .map(|w| format!("{:.1}", w))
+                .unwrap_or_default(),
+            calories_kcal: point
+                .cumulative_energy_kj
+                .map(|e| format!("{:.0}", e))
+                .unwrap_or_default(),
         };
         writer
             .serialize(record)
@@ -209,6 +220,8 @@ mod tests {
             instant_speed_kmh: 30.0,
             average_speed_kmh: 28.0,
             distance_km,
+            power_4s_watts: None,
+            cumulative_energy_kj: None,
         }
     }
 
@@ -224,7 +237,7 @@ mod tests {
         let content = fs::read_to_string(temp_file.path()).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 3, "header + 2 data rows");
-        assert_eq!(lines[0].split(',').count(), 9, "9 columns in header");
+        assert_eq!(lines[0].split(',').count(), 11, "11 columns in header");
     }
 
     #[test]
@@ -235,6 +248,52 @@ mod tests {
         let content = fs::read_to_string(temp_file.path()).unwrap();
         assert!(content.contains("48"));
         assert!(content.contains("0.0"));
+    }
+
+    #[test]
+    fn test_write_analyze_csv_calories_empty_when_no_power() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let points = vec![make_analyze_point(0.0, 0.0)];
+        write_analyze_csv(&points, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        let records: Vec<_> = rdr.records().collect();
+        assert_eq!(records[0].as_ref().unwrap().get(10).unwrap(), "");
+    }
+
+    #[test]
+    fn test_write_analyze_csv_calories_present_when_power_given() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut point = make_analyze_point(10.0, 0.083);
+        point.cumulative_energy_kj = Some(2.0);
+        write_analyze_csv(&[point], temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        let records: Vec<_> = rdr.records().collect();
+        assert_eq!(records[0].as_ref().unwrap().get(10).unwrap(), "2");
+    }
+
+    #[test]
+    fn test_write_analyze_csv_power_4s_empty_when_none() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let points = vec![make_analyze_point(0.0, 0.0)];
+        write_analyze_csv(&points, temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        let records: Vec<_> = rdr.records().collect();
+        assert_eq!(records[0].as_ref().unwrap().get(9).unwrap(), "");
+    }
+
+    #[test]
+    fn test_write_analyze_csv_power_4s_present_when_some() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut point = make_analyze_point(5.0, 0.04);
+        point.power_4s_watts = Some(185.5);
+        write_analyze_csv(&[point], temp_file.path()).unwrap();
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        let records: Vec<_> = rdr.records().collect();
+        assert_eq!(records[0].as_ref().unwrap().get(9).unwrap(), "185.5");
     }
 
     #[test]
