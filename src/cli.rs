@@ -124,6 +124,11 @@ pub struct AnalyzeCommand {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
+    /// Half-window for instant speed and power smoothing (default: 5).
+    /// Both are computed over [i-n, i+n] seconds; use 0 for consecutive-point speed.
+    #[arg(long, default_value = "5")]
+    pub smooth_window: usize,
+
     /// Enable verbose output
     #[arg(short, long)]
     pub verbose: bool,
@@ -171,6 +176,11 @@ pub struct PlotCommand {
     /// Path to config file (default: platform config dir)
     #[arg(long)]
     pub config: Option<PathBuf>,
+
+    /// Half-window for instant speed and power smoothing (default: 5).
+    /// Both are computed over [i-n, i+n] seconds; use 0 for consecutive-point speed.
+    #[arg(long, default_value = "5")]
+    pub smooth_window: usize,
 
     /// Enable verbose output
     #[arg(short, long)]

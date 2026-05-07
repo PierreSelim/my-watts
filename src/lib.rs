@@ -89,7 +89,7 @@ pub struct AnalyzePoint {
     pub instant_speed_kmh: f64,
     pub average_speed_kmh: f64,
     pub distance_km: f64,
-    pub power_4s_watts: Option<f64>,
+    pub power_smooth_watts: Option<f64>,
     pub cumulative_energy_kj: Option<f64>,
 }
 

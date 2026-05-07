@@ -52,10 +52,16 @@ pub fn analyze_track(
     smoothed: &Track,
     power_points: Option<&[PowerPoint]>,
     moving_speed_threshold_kmh: f64,
+    smooth_window_half: usize,
 ) -> (Vec<AnalyzePoint>, Vec<IntervalSummary>) {
     debug_assert_eq!(raw.len(), smoothed.len());
-    let analyze_points =
-        compute_analyze_points(raw, smoothed, power_points, moving_speed_threshold_kmh);
+    let analyze_points = compute_analyze_points(
+        raw,
+        smoothed,
+        power_points,
+        moving_speed_threshold_kmh,
+        smooth_window_half,
+    );
     let intervals = compute_intervals(&analyze_points, power_points, moving_speed_threshold_kmh);
     (analyze_points, intervals)
 }
@@ -65,6 +71,7 @@ fn compute_analyze_points(
     smoothed: &Track,
     power_points: Option<&[PowerPoint]>,
     moving_speed_threshold_kmh: f64,
+    smooth_window_half: usize,
 ) -> Vec<AnalyzePoint> {
     if smoothed.is_empty() {
         return vec![];
@@ -82,15 +89,39 @@ fn compute_analyze_points(
         let seconds_from_start =
             (smooth_pt.timestamp - first_ts).num_milliseconds() as f64 / 1000.0;
 
-        let (instant_speed_kmh, distance_delta_km, dt) = if i == 0 {
-            (0.0, 0.0, 0.0)
+        let (distance_delta_km, dt) = if i == 0 {
+            (0.0, 0.0)
         } else {
             let prev_smooth = &smoothed.points[i - 1];
             let dist_m = haversine_distance(prev_smooth, smooth_pt);
             let dt =
                 (smooth_pt.timestamp - prev_smooth.timestamp).num_milliseconds() as f64 / 1000.0;
-            let speed_kmh = if dt > 0.0 { dist_m / dt * 3.6 } else { 0.0 };
-            (speed_kmh, dist_m / 1000.0, dt)
+            (dist_m / 1000.0, dt)
+        };
+
+        let instant_speed_kmh = {
+            let (back_idx, fwd_idx) = if smooth_window_half == 0 || i == 0 {
+                (i.saturating_sub(1), i)
+            } else {
+                (
+                    i.saturating_sub(smooth_window_half),
+                    (i + smooth_window_half).min(smoothed.len() - 1),
+                )
+            };
+            if back_idx == fwd_idx {
+                0.0
+            } else {
+                let p_back = &smoothed.points[back_idx];
+                let p_fwd = &smoothed.points[fwd_idx];
+                let dist_m = haversine_distance(p_back, p_fwd);
+                let total_dt =
+                    (p_fwd.timestamp - p_back.timestamp).num_milliseconds() as f64 / 1000.0;
+                if total_dt > 0.0 {
+                    dist_m / total_dt * 3.6
+                } else {
+                    0.0
+                }
+            }
         };
 
         cumulative_distance_km += distance_delta_km;
@@ -122,8 +153,8 @@ fn compute_analyze_points(
             0.0
         };
 
-        let power_4s_watts: Option<f64> = if let Some(pp) = power_points {
-            let half_window_ms = 2_000i64;
+        let power_smooth_watts: Option<f64> = if let Some(pp) = power_points {
+            let half_window_ms = smooth_window_half as i64 * 1_000;
             while centered_window_end < pp.len()
                 && (pp[centered_window_end].timestamp - smooth_pt.timestamp).num_milliseconds()
                     <= half_window_ms
@@ -158,7 +189,7 @@ fn compute_analyze_points(
             instant_speed_kmh,
             average_speed_kmh,
             distance_km: cumulative_distance_km,
-            power_4s_watts,
+            power_smooth_watts,
             cumulative_energy_kj: power_points.map(|_| cumulative_energy_kj),
         });
     }
@@ -265,7 +296,7 @@ mod tests {
             instant_speed_kmh: 30.0,
             average_speed_kmh: 0.0,
             distance_km,
-            power_4s_watts: None,
+            power_smooth_watts: None,
             cumulative_energy_kj: None,
         }
     }
@@ -285,7 +316,7 @@ mod tests {
     #[test]
     fn test_first_point_all_zeroes() {
         let track = make_moving_track(5, 10);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         let first = &points[0];
         assert_eq!(first.seconds_from_start, 0.0);
         assert_eq!(first.instant_speed_kmh, 0.0);
@@ -297,7 +328,7 @@ mod tests {
     fn test_raw_and_smoothed_coords_preserved() {
         let raw = make_moving_track(3, 10);
         let smoothed = make_moving_track(3, 10);
-        let (points, _) = analyze_track(&raw, &smoothed, None, 3.0);
+        let (points, _) = analyze_track(&raw, &smoothed, None, 3.0, 1);
         for (i, pt) in points.iter().enumerate() {
             assert_eq!(pt.raw_lat, raw.points[i].lat);
             assert_eq!(pt.raw_lon, raw.points[i].lon);
@@ -309,7 +340,7 @@ mod tests {
     #[test]
     fn test_monotonic_distance() {
         let track = make_moving_track(10, 10);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         for w in points.windows(2) {
             assert!(
                 w[1].distance_km >= w[0].distance_km,
@@ -323,7 +354,7 @@ mod tests {
     #[test]
     fn test_two_point_average_speed_equals_instant_speed() {
         let track = make_moving_track(2, 1);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         assert_eq!(points.len(), 2);
         let second = &points[1];
         assert!((second.average_speed_kmh - second.instant_speed_kmh).abs() < 1e-9);
@@ -337,7 +368,7 @@ mod tests {
             make_gps_point(48.8566, 2.3522, 10),
         ];
         let track = Track::new(pts).unwrap();
-        let (analyze_pts, _) = analyze_track(&track, &track, None, 3.0);
+        let (analyze_pts, _) = analyze_track(&track, &track, None, 3.0, 1);
         assert_eq!(analyze_pts[1].instant_speed_kmh, 0.0);
         assert_eq!(analyze_pts[1].distance_km, 0.0);
     }
@@ -345,7 +376,7 @@ mod tests {
     #[test]
     fn test_average_speed_consistent_with_distance_over_time() {
         let track = make_moving_track(20, 10);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         for pt in &points {
             if pt.seconds_from_start > 0.0 {
                 let expected = pt.distance_km / (pt.seconds_from_start / 3600.0);
@@ -363,7 +394,7 @@ mod tests {
     #[test]
     fn test_output_length_matches_input() {
         let track = make_moving_track(17, 5);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         assert_eq!(points.len(), 17);
     }
 
@@ -372,14 +403,14 @@ mod tests {
     #[test]
     fn test_no_power_gives_none_in_all_intervals() {
         let track = make_moving_track(5, 10);
-        let (_, intervals) = analyze_track(&track, &track, None, 3.0);
+        let (_, intervals) = analyze_track(&track, &track, None, 3.0, 1);
         assert!(intervals.iter().all(|s| s.average_power_watts.is_none()));
     }
 
     #[test]
     fn test_no_power_gives_none_energy_in_all_points() {
         let track = make_moving_track(5, 10);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         assert!(points.iter().all(|p| p.cumulative_energy_kj.is_none()));
     }
 
@@ -399,7 +430,7 @@ mod tests {
             },
         };
         let power_points = compute_power(&track, &power_cfg).unwrap();
-        let (_, intervals) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        let (_, intervals) = analyze_track(&track, &track, Some(&power_points), 3.0, 1);
         assert!(intervals.iter().all(|s| s.average_power_watts.is_some()));
     }
 
@@ -419,7 +450,7 @@ mod tests {
             },
         };
         let power_points = compute_power(&track, &power_cfg).unwrap();
-        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0, 1);
         assert_eq!(points[0].cumulative_energy_kj, Some(0.0));
     }
 
@@ -439,7 +470,7 @@ mod tests {
             },
         };
         let power_points = compute_power(&track, &power_cfg).unwrap();
-        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0, 1);
         for w in points.windows(2) {
             assert!(
                 w[1].cumulative_energy_kj >= w[0].cumulative_energy_kj,
@@ -500,7 +531,7 @@ mod tests {
             })
             .collect();
 
-        let (points, _) = analyze_track(&track, &track, Some(&aligned_power), 3.0);
+        let (points, _) = analyze_track(&track, &track, Some(&aligned_power), 3.0, 1);
         let _ = first_ts;
         let total_energy = points.last().unwrap().cumulative_energy_kj.unwrap();
         assert!(
@@ -528,9 +559,9 @@ mod tests {
             },
         };
         let power_points = compute_power(&track, &power_cfg).unwrap();
-        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0);
+        let (points, _) = analyze_track(&track, &track, Some(&power_points), 3.0, 1);
         assert_eq!(
-            points[0].power_4s_watts, None,
+            points[0].power_smooth_watts, None,
             "first point has no power within ±2s"
         );
     }
@@ -552,20 +583,21 @@ mod tests {
                 gradient: 0.0,
             })
             .collect();
-        let (points, _) = analyze_track(&track, &track, Some(&power_pts), 3.0);
+        let (points, _) = analyze_track(&track, &track, Some(&power_pts), 3.0, 1);
         // Points 0 and 1 have power points within ±2s; all return 200 W.
         for pt in &points[..] {
-            if let Some(w) = pt.power_4s_watts {
+            if let Some(w) = pt.power_smooth_watts {
                 assert!((w - 200.0).abs() < 1e-9, "expected 200 W, got {w}");
             }
         }
     }
 
     #[test]
-    fn test_power_4s_centered_window_drops_spike_outside_2s() {
+    fn test_power_smooth_centered_window_drops_spike_outside_window() {
         use crate::power::PowerPoint;
+        // smooth_window_half=2 → ±2 s window.
         // Spike at pp[0] (timestamp base_ts+1, 1000 W), rest 100 W.
-        // Spike is in the ±2s centered window of analyze points i=0..=3
+        // Spike is in the window of analyze points i=0..=3
         // (|base_ts+1 - (base_ts+i)| = |1-i| ≤ 2 ⟺ i ≤ 3).
         // At i=3 (t=base_ts+3): window [base_ts+1, base_ts+5] → pp[0..5]
         //   = 1000 + 4×100 = 1400 / 5 = 280 W.
@@ -585,16 +617,16 @@ mod tests {
                 gradient: 0.0,
             })
             .collect();
-        let (points, _) = analyze_track(&track, &track, Some(&power_pts), 3.0);
+        let (points, _) = analyze_track(&track, &track, Some(&power_pts), 3.0, 2);
 
-        let w3 = points[3].power_4s_watts.unwrap();
+        let w3 = points[3].power_smooth_watts.unwrap();
         let expected3 = (1000.0 + 4.0 * 100.0) / 5.0;
         assert!(
             (w3 - expected3).abs() < 1e-9,
             "expected {expected3:.4} W at i=3, got {w3}"
         );
 
-        let w4 = points[4].power_4s_watts.unwrap();
+        let w4 = points[4].power_smooth_watts.unwrap();
         assert!(
             (w4 - 100.0).abs() < 1e-9,
             "spike dropped at i=4, expected 100 W, got {w4}"
@@ -604,8 +636,8 @@ mod tests {
     #[test]
     fn test_power_4s_is_none_without_power_points() {
         let track = make_moving_track(5, 1);
-        let (points, _) = analyze_track(&track, &track, None, 3.0);
-        assert!(points.iter().all(|p| p.power_4s_watts.is_none()));
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
+        assert!(points.iter().all(|p| p.power_smooth_watts.is_none()));
     }
 
     // --- compute_intervals tests using direct AnalyzePoint construction ---
@@ -807,5 +839,41 @@ mod tests {
         one_min.sort_by_key(|s| s.interval_index);
         let indices: Vec<usize> = one_min.iter().map(|s| s.interval_index).collect();
         assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_smooth_window_reduces_spike() {
+        // 11 points (i=0..=10) with 1-second spacing, moving ~36 km/h.
+        // Point 5 is displaced 50 m north (GPS artifact).
+        //
+        // The centered window at point i uses [i-n, i+n], so the artifact at pts[5] does NOT
+        // appear at i=5 itself (which uses pts[4] and pts[6]). It appears at neighboring points:
+        //   i=4: window=1 uses haversine(pts[3], pts[5_displaced]) → large spike
+        //         window=5 uses haversine(pts[0], pts[9])           → normal speed
+        let base_lat = 48.8566_f64;
+        let base_lon = 2.3522_f64;
+        let artifact_deg = 50.0_f64 / 111_000.0;
+        let mut pts: Vec<GpsPoint> = (0..11)
+            .map(|i| GpsPoint {
+                lat: base_lat + i as f64 * LAT_STEP,
+                lon: base_lon,
+                alt: Some(100.0),
+                timestamp: DateTime::from_timestamp(1_700_000_000 + i as i64, 0).unwrap(),
+            })
+            .collect();
+        pts[5].lat += artifact_deg;
+
+        let track = Track::new(pts).unwrap();
+
+        let (points_narrow, _) = analyze_track(&track, &track, None, 3.0, 1);
+        let (points_wide, _) = analyze_track(&track, &track, None, 3.0, 5);
+
+        let spike_narrow = points_narrow[4].instant_speed_kmh;
+        let spike_wide = points_wide[4].instant_speed_kmh;
+
+        assert!(
+            spike_narrow > spike_wide,
+            "window=1 spike ({spike_narrow:.1}) should exceed window=5 spike ({spike_wide:.1})"
+        );
     }
 }

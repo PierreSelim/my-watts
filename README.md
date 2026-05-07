@@ -75,6 +75,7 @@ Options:
 - `--bike-weight <KG>`: Bike weight in kg (default: 10.0)
 - `--window-size <N>`: Savitzky-Golay window size, must be odd (default: 5)
 - `--degree <N>`: Polynomial degree for smoothing (default: 2)
+- `--smooth-window <N>`: Half-window for instant speed and power smoothing — both are computed over `[i-N, i+N]` seconds (default: 5); use 0 for consecutive-point speed
 - `--config <FILE>`: Path to `config.toml`
 - `-o, --output <FILE>`: Override the per-point CSV path
 - `-v, --verbose`: Print ride summary (distance, avg speed, avg power)
@@ -83,6 +84,39 @@ Example:
 
 ```bash
 cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel -v
+```
+
+### Interactive terminal plot
+
+```bash
+cargo run --release -- plot <INPUT.gpx> [OPTIONS]
+```
+
+Runs the full analysis pipeline and renders a live ratatui chart in the terminal. Press `q` or `Esc` to quit. No output files are written.
+
+The power panel shows two series:
+- **yellow** — smoothed instant power (`--smooth-window` rolling average)
+- **green** — cumulative average power over moving time
+
+The speed panel shows:
+- **cyan** — instant speed
+- **green** — cumulative average speed
+
+Options:
+
+- `--rider-weight <KG>`: Rider weight in kg (default: 75.0 or value from `config.toml`)
+- `--bike <NAME>`: Bike preset (default: `road` or value from `config.toml`)
+- `--bike-weight <KG>`: Bike weight in kg (default: 10.0)
+- `--window-size <N>`: Savitzky-Golay window size, must be odd (default: 5)
+- `--degree <N>`: Polynomial degree for smoothing (default: 2)
+- `--smooth-window <N>`: Half-window for instant speed and power smoothing (default: 5)
+- `--config <FILE>`: Path to `config.toml`
+- `-v, --verbose`: Print loading details
+
+Example:
+
+```bash
+cargo run --release -- plot my_ride.gpx --rider-weight 72 --bike gravel
 ```
 
 ## Output Formats
@@ -113,7 +147,7 @@ cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel -v
 | `seconds_from_start` | Elapsed seconds from first point |
 | `raw_lat`, `raw_lon` | Original GPS coordinates |
 | `smoothed_lat`, `smoothed_lon` | Savitzky-Golay smoothed coordinates |
-| `instant_speed_kmh` | Speed since previous point (km/h) |
+| `instant_speed_kmh` | Speed over `[i−N, i+N]` smoothed points where N = `--smooth-window` (km/h) |
 | `average_speed_kmh` | Cumulative average speed since start (km/h) |
 | `distance_km` | Cumulative distance using smoothed coords (km) |
 

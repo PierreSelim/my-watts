@@ -126,6 +126,7 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
         &smoothed_track,
         Some(&power_points),
         moving_speed_threshold_kmh,
+        cmd.smooth_window,
     );
 
     let analyze_path = cmd.analyze_output_path();
@@ -227,6 +228,7 @@ fn run_plot(cmd: &cli::PlotCommand) -> Result<(), GpsAnalyzerError> {
         &smoothed_track,
         Some(&power_points),
         moving_speed_threshold_kmh,
+        cmd.smooth_window,
     );
 
     let plot_data = tui::build_plot_data(&analyze_points);

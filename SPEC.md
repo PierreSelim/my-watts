@@ -186,6 +186,7 @@ Options:
   -o, --output <FILE>         Output CSV for per-point data (default: input.analyze.csv)
   --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
   --degree <N>                Polynomial degree for smoothing (default: 2)
+  --smooth-window <N>         Half-window for instant speed and power smoothing (default: 5)
   --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
   --bike-weight <KG>          Bike weight in kg (default: 10.0)
   --bike <NAME>               Bike preset name (default: config or "road")
@@ -217,10 +218,10 @@ One row per GPS point, in track order:
 | `seconds_from_start` | Elapsed seconds from first point (rounded to 0.01) |
 | `raw_lat`, `raw_lon` | Original GPS coordinates |
 | `smoothed_lat`, `smoothed_lon` | Savitzky-Golay smoothed coordinates |
-| `instant_speed_kmh` | Speed from previous point in km/h (0.0 for first point, rounded to 0.1) |
+| `instant_speed_kmh` | Speed computed over `[i−n, i+n]` smoothed points where `n = --smooth-window`, clamped at track boundaries. 0.0 for the first point. Rounded to 0.1 km/h. |
 | `average_speed_kmh` | Cumulative average speed since start in km/h (0.0 for first point, rounded to 0.1) |
 | `distance_km` | Cumulative distance using smoothed coords in km (rounded to 0.001) |
-| `power_4s_watts` | Centered 4-second rolling average power in watts (rounded to 0.1); empty string if no power points fall within ±2 s of the current timestamp |
+| `power_smooth_watts` | Centered rolling average power over `[i−n, i+n]` seconds where `n = --smooth-window` (rounded to 0.1); empty string if no power points fall within the window |
 
 ### Output: `input.intervals.csv`
 
@@ -286,6 +287,7 @@ Arguments:
 Options:
   --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
   --degree <N>                Polynomial degree for smoothing (default: 2)
+  --smooth-window <N>         Half-window for instant speed and power smoothing (default: 5)
   --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
   --bike-weight <KG>          Bike weight in kg (default: 10.0)
   --bike <NAME>               Bike preset name (default: config or "road")
@@ -302,7 +304,9 @@ Two chart panels stacked vertically, with a one-line status bar below:
 
 ```
 ┌─────────────────────────────────────────┐
-│  Power (W)  — yellow braille line       │  ~57% of height
+│  Power (W)                              │  ~57% of height
+│    yellow = smoothed instant power      │
+│    green  = cumulative average power    │
 ├─────────────────────────────────────────┤
 │  Speed (km/h)                           │  ~40% of height
 │    cyan  = instant speed                │

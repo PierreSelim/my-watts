@@ -84,7 +84,7 @@ struct AnalyzeCsvRecord {
     instant_speed_kmh: f64,
     average_speed_kmh: f64,
     distance_km: f64,
-    power_4s_watts: String,
+    power_smooth_watts: String,
     // kJ ≈ kcal: cycling mechanical efficiency ~25% and 1 kcal = 4.184 kJ cancel to ~1:1
     calories_kcal: String,
 }
@@ -107,8 +107,8 @@ pub fn write_analyze_csv<P: AsRef<Path>>(
             instant_speed_kmh: (point.instant_speed_kmh * 10.0).round() / 10.0,
             average_speed_kmh: (point.average_speed_kmh * 10.0).round() / 10.0,
             distance_km: (point.distance_km * 1000.0).round() / 1000.0,
-            power_4s_watts: point
-                .power_4s_watts
+            power_smooth_watts: point
+                .power_smooth_watts
                 .map(|w| format!("{:.1}", w))
                 .unwrap_or_default(),
             calories_kcal: point
@@ -220,7 +220,7 @@ mod tests {
             instant_speed_kmh: 30.0,
             average_speed_kmh: 28.0,
             distance_km,
-            power_4s_watts: None,
+            power_smooth_watts: None,
             cumulative_energy_kj: None,
         }
     }
@@ -288,7 +288,7 @@ mod tests {
     fn test_write_analyze_csv_power_4s_present_when_some() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut point = make_analyze_point(5.0, 0.04);
-        point.power_4s_watts = Some(185.5);
+        point.power_smooth_watts = Some(185.5);
         write_analyze_csv(&[point], temp_file.path()).unwrap();
         let content = fs::read_to_string(temp_file.path()).unwrap();
         let mut rdr = csv::Reader::from_reader(content.as_bytes());
