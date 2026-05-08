@@ -78,3 +78,4 @@ cargo tarpaulin --out Html  # Generate test coverage report
 4. **Implement with types** — let the compiler guide you. If types align, logic often follows.
 5. **Write tests** alongside implementation.
 6. **Run quality checks** — `cargo fmt`, `cargo clippy`, `cargo test` before marking as complete.
+7. If needed update SPEC.md, ARCHITECTURE.md and README.md
