@@ -1,5 +1,13 @@
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn default_output_path(input: &Path, suffix: &str) -> PathBuf {
+    let stem = input
+        .file_stem()
+        .unwrap_or_else(|| input.as_os_str())
+        .to_string_lossy();
+    PathBuf::from(format!("{}.{}", stem, suffix))
+}
 
 #[derive(Parser)]
 #[command(name = "my-watts")]
@@ -45,10 +53,9 @@ pub struct SmoothCommand {
 
 impl SmoothCommand {
     pub fn output_path(&self) -> PathBuf {
-        self.output.clone().unwrap_or_else(|| {
-            let input_stem = self.input.file_stem().unwrap().to_string_lossy();
-            PathBuf::from(format!("{}.smoothed.csv", input_stem))
-        })
+        self.output
+            .clone()
+            .unwrap_or_else(|| default_output_path(&self.input, "smoothed.csv"))
     }
 }
 
@@ -84,10 +91,9 @@ pub struct PowerCommand {
 
 impl PowerCommand {
     pub fn output_path(&self) -> PathBuf {
-        self.output.clone().unwrap_or_else(|| {
-            let input_stem = self.input.file_stem().unwrap().to_string_lossy();
-            PathBuf::from(format!("{}.power.csv", input_stem))
-        })
+        self.output
+            .clone()
+            .unwrap_or_else(|| default_output_path(&self.input, "power.csv"))
     }
 }
 
@@ -136,15 +142,13 @@ pub struct AnalyzeCommand {
 
 impl AnalyzeCommand {
     pub fn analyze_output_path(&self) -> PathBuf {
-        self.output.clone().unwrap_or_else(|| {
-            let input_stem = self.input.file_stem().unwrap().to_string_lossy();
-            PathBuf::from(format!("{}.analyze.csv", input_stem))
-        })
+        self.output
+            .clone()
+            .unwrap_or_else(|| default_output_path(&self.input, "analyze.csv"))
     }
 
     pub fn intervals_output_path(&self) -> PathBuf {
-        let input_stem = self.input.file_stem().unwrap().to_string_lossy();
-        PathBuf::from(format!("{}.intervals.csv", input_stem))
+        default_output_path(&self.input, "intervals.csv")
     }
 }
 

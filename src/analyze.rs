@@ -1,5 +1,6 @@
 use crate::power::{haversine_distance, PowerPoint};
 use crate::{AnalyzePoint, IntervalSummary, Track};
+use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
 enum IntervalKind {
@@ -45,6 +46,31 @@ fn interval_specs() -> Vec<IntervalSpec> {
             kind: IntervalKind::Distance { window_km: 10.0 },
         },
     ]
+}
+
+fn advance_power_window(
+    pp: &[PowerPoint],
+    smooth_ts: DateTime<Utc>,
+    half_window_ms: i64,
+    start: &mut usize,
+    end: &mut usize,
+) -> Option<f64> {
+    while *end < pp.len()
+        && (pp[*end].timestamp - smooth_ts).num_milliseconds() <= half_window_ms
+    {
+        *end += 1;
+    }
+    while *start < *end
+        && (smooth_ts - pp[*start].timestamp).num_milliseconds() > half_window_ms
+    {
+        *start += 1;
+    }
+    if *start >= *end {
+        None
+    } else {
+        let slice = &pp[*start..*end];
+        Some(slice.iter().map(|p| p.power_watts).sum::<f64>() / slice.len() as f64)
+    }
 }
 
 pub fn analyze_track(
@@ -153,30 +179,16 @@ fn compute_analyze_points(
             0.0
         };
 
-        let power_smooth_watts: Option<f64> = if let Some(pp) = power_points {
+        let power_smooth_watts: Option<f64> = power_points.and_then(|pp| {
             let half_window_ms = smooth_window_half as i64 * 1_000;
-            while centered_window_end < pp.len()
-                && (pp[centered_window_end].timestamp - smooth_pt.timestamp).num_milliseconds()
-                    <= half_window_ms
-            {
-                centered_window_end += 1;
-            }
-            while centered_window_start < centered_window_end
-                && (smooth_pt.timestamp - pp[centered_window_start].timestamp).num_milliseconds()
-                    > half_window_ms
-            {
-                centered_window_start += 1;
-            }
-            if centered_window_start >= centered_window_end {
-                None
-            } else {
-                let slice = &pp[centered_window_start..centered_window_end];
-                let sum: f64 = slice.iter().map(|p| p.power_watts).sum();
-                Some(sum / slice.len() as f64)
-            }
-        } else {
-            None
-        };
+            advance_power_window(
+                pp,
+                smooth_pt.timestamp,
+                half_window_ms,
+                &mut centered_window_start,
+                &mut centered_window_end,
+            )
+        });
 
         result.push(AnalyzePoint {
             timestamp: smooth_pt.timestamp,
@@ -228,16 +240,14 @@ fn compute_intervals(
             let first = bucket_points[0];
             let last = *bucket_points.last().unwrap();
             let duration_seconds = last.seconds_from_start - first.seconds_from_start;
-            let moving_duration_seconds =
-                last.moving_seconds_from_start - first.moving_seconds_from_start;
             let distance_km = last.distance_km - first.distance_km;
-            let average_speed_kmh = if moving_duration_seconds > 0.0 {
-                distance_km / (moving_duration_seconds / 3600.0)
+            let average_speed_kmh = if duration_seconds > 0.0 {
+                distance_km / (duration_seconds / 3600.0)
             } else {
                 0.0
             };
 
-            let average_power_watts = power_points.map(|pp| {
+            let average_power_watts = power_points.and_then(|pp| {
                 let powers: Vec<f64> = pp
                     .iter()
                     .filter(|p| {
@@ -248,9 +258,9 @@ fn compute_intervals(
                     .map(|p| p.power_watts)
                     .collect();
                 if powers.is_empty() {
-                    0.0
+                    None
                 } else {
-                    powers.iter().sum::<f64>() / powers.len() as f64
+                    Some(powers.iter().sum::<f64>() / powers.len() as f64)
                 }
             });
 
@@ -376,12 +386,12 @@ mod tests {
     }
 
     #[test]
-    fn test_average_speed_consistent_with_distance_over_time() {
+    fn test_average_speed_consistent_with_distance_over_moving_time() {
         let track = make_moving_track(20, 10);
         let (points, _) = analyze_track(&track, &track, None, 3.0, 1);
         for pt in &points {
-            if pt.seconds_from_start > 0.0 {
-                let expected = pt.distance_km / (pt.seconds_from_start / 3600.0);
+            if pt.moving_seconds_from_start > 0.0 {
+                let expected = pt.distance_km / (pt.moving_seconds_from_start / 3600.0);
                 assert!(
                     (pt.average_speed_kmh - expected).abs() < 1e-9,
                     "mismatch at {}s: got {}, expected {}",
@@ -391,6 +401,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_average_speed_uses_moving_not_elapsed_time() {
+        // pt0→pt1: stationary (same location, 10s), pt1→pt2: moving (~10m, 10s)
+        // elapsed = 20s, moving ≈ 10s → moving-based speed is ~2× the elapsed-based speed
+        let pts = vec![
+            make_gps_point(48.8566, 2.3522, 0),
+            make_gps_point(48.8566, 2.3522, 10),
+            make_gps_point(48.8566 + LAT_STEP, 2.3522, 20),
+        ];
+        let track = Track::new(pts).unwrap();
+        let (points, _) = analyze_track(&track, &track, None, 3.0, 0);
+        let last = points.last().unwrap();
+        assert!(
+            last.moving_seconds_from_start < last.seconds_from_start,
+            "test requires a stationary period"
+        );
+        let expected = last.distance_km / (last.moving_seconds_from_start / 3600.0);
+        assert!(
+            (last.average_speed_kmh - expected).abs() < 1e-9,
+            "expected moving-based avg speed {expected:.6}, got {:.6}",
+            last.average_speed_kmh
+        );
     }
 
     #[test]

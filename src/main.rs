@@ -2,19 +2,9 @@ mod cli;
 
 use clap::Parser;
 use my_watts::{
-    analyze, config::AppConfig, csv, gpx, power, smoothing, tui, GpsAnalyzerError,
+    analyze, config::AppConfig, csv, fmt_hhmmss, gpx, power, smoothing, tui, GpsAnalyzerError,
     SavitzkyGolayConfig,
 };
-
-fn fmt_hhmmss(total_secs: f64) -> String {
-    let secs = total_secs as u64;
-    format!(
-        "{:02}:{:02}:{:02}",
-        secs / 3600,
-        (secs % 3600) / 60,
-        secs % 60
-    )
-}
 
 fn main() {
     let cli = cli::Cli::parse();

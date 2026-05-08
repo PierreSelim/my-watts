@@ -18,6 +18,7 @@ pub struct PowerPoint {
     pub timestamp: DateTime<Utc>,
     pub power_watts: f64,
     pub speed_ms: f64,
+    /// Dimensionless rise-over-run ratio; multiply by 100 to get percent.
     pub gradient: f64,
 }
 

@@ -59,7 +59,7 @@ pub fn write_power_csv<P: AsRef<Path>>(
             timestamp: point.timestamp.to_rfc3339(),
             power_watts: (point.power_watts * 10.0).round() / 10.0,
             speed_kmh: (point.speed_ms * 3.6 * 10.0).round() / 10.0,
-            gradient_pct: (point.gradient * 1000.0).round() / 10.0,
+            gradient_pct: (point.gradient * 100.0 * 10.0).round() / 10.0,
         };
         writer
             .serialize(record)
@@ -85,7 +85,8 @@ struct AnalyzeCsvRecord {
     average_speed_kmh: f64,
     distance_km: f64,
     power_smooth_watts: String,
-    // kJ ≈ kcal: cycling mechanical efficiency ~25% and 1 kcal = 4.184 kJ cancel to ~1:1
+    // mechanical_kJ / (0.25 efficiency × 4.184 kJ·kcal⁻¹) ≈ mechanical_kJ × 0.957
+    // Stores mechanical work in kJ, which approximates metabolic kcal within ~5%.
     calories_kcal: String,
 }
 

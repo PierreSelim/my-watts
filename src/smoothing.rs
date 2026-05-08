@@ -99,13 +99,8 @@ fn savitzky_golay_smooth(
         "Cannot invert design matrix".to_string(),
     ))? * xty;
 
-    // Evaluate polynomial at center point (index = point_index)
-    let mut result = 0.0;
-    for j in 0..=poly_degree {
-        result += coeffs[j] * 0.0_f64.powi(j as i32);
-    }
-
-    Ok(result)
+    // x=0 by construction (center point), so the polynomial evaluates to its constant term
+    Ok(coeffs[0])
 }
 
 #[cfg(test)]

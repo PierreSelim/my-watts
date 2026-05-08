@@ -108,12 +108,14 @@ pub fn build_plot_data(points: &[AnalyzePoint]) -> PlotData {
         .unwrap_or(0.0);
     let avg_speed_kmh = points.last().map(|p| p.average_speed_kmh).unwrap_or(0.0);
 
-    let valid_power: Vec<f64> = points.iter().filter_map(|p| p.power_smooth_watts).collect();
-    let avg_power_watts = if valid_power.is_empty() {
-        None
-    } else {
-        Some(valid_power.iter().sum::<f64>() / valid_power.len() as f64)
-    };
+    let avg_power_watts = points.last().and_then(|last| {
+        let kj = last.cumulative_energy_kj?;
+        if last.moving_seconds_from_start > 0.0 {
+            Some(kj * 1000.0 / last.moving_seconds_from_start)
+        } else {
+            None
+        }
+    });
 
     let total_elevation_gain_m = if altitude_series.is_empty() {
         None
@@ -196,22 +198,12 @@ fn draw(frame: &mut Frame, data: &PlotData) {
     draw_status_bar(frame, areas[2], data);
 }
 
-fn fmt_hhmmss(total_secs: f64) -> String {
-    let secs = total_secs as u64;
-    format!(
-        "{:02}:{:02}:{:02}",
-        secs / 3600,
-        (secs % 3600) / 60,
-        secs % 60
-    )
-}
-
 fn time_axis_labels(bounds: &[f64; 2]) -> Vec<Span<'static>> {
     let mid = (bounds[0] + bounds[1]) / 2.0;
     vec![
-        Span::raw(fmt_hhmmss(bounds[0])),
-        Span::raw(fmt_hhmmss(mid)),
-        Span::raw(fmt_hhmmss(bounds[1])),
+        Span::raw(crate::fmt_hhmmss(bounds[0])),
+        Span::raw(crate::fmt_hhmmss(mid)),
+        Span::raw(crate::fmt_hhmmss(bounds[1])),
     ]
 }
 
@@ -329,8 +321,8 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, data: &PlotData) {
     let text = format!(
         " Dist: {:.2} km  |  Elapsed: {}  |  Moving: {}  |  Avg speed: {:.1} km/h  |  Avg power: {}{}  |  [q] quit",
         s.total_distance_km,
-        fmt_hhmmss(s.elapsed_secs),
-        fmt_hhmmss(s.moving_secs),
+        crate::fmt_hhmmss(s.elapsed_secs),
+        crate::fmt_hhmmss(s.moving_secs),
         s.avg_speed_kmh,
         power_str,
         elevation_str,
@@ -447,7 +439,9 @@ mod tests {
             make_point(60.0, 20.0, 15.0, Some(200.0), 0.3),
         ];
         let data = build_plot_data(&points);
-        assert!((data.summary.avg_power_watts.unwrap() - 200.0).abs() < 1e-9);
+        // energy-based: cumulative_energy_kj * 1000 / moving_secs = 12000 / 54 ≈ 222.2 W
+        let expected = 200.0 * 60.0 / (60.0 * 0.9);
+        assert!((data.summary.avg_power_watts.unwrap() - expected).abs() < 1e-9);
     }
 
     #[test]

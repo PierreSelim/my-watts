@@ -219,7 +219,7 @@ One row per GPS point, in track order:
 | `raw_lat`, `raw_lon` | Original GPS coordinates |
 | `smoothed_lat`, `smoothed_lon` | Savitzky-Golay smoothed coordinates |
 | `instant_speed_kmh` | Speed computed over `[i−n, i+n]` smoothed points where `n = --smooth-window`, clamped at track boundaries. 0.0 for the first point. Rounded to 0.1 km/h. |
-| `average_speed_kmh` | Cumulative average speed since start in km/h (0.0 for first point, rounded to 0.1) |
+| `average_speed_kmh` | Cumulative average moving speed since start in km/h: `distance_km / (moving_seconds / 3600)`. 0.0 for the first point and while stationary. Rounded to 0.1. Matches what Strava and bike computers report. |
 | `distance_km` | Cumulative distance using smoothed coords in km (rounded to 0.001) |
 | `power_smooth_watts` | Centered rolling average power over `[i−n, i+n]` seconds where `n = --smooth-window` (rounded to 0.1); empty string if no power points fall within the window |
 

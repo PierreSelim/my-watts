@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use std::num::NonZeroU32;
 use thiserror::Error;
 
 pub mod analyze;
@@ -41,7 +40,7 @@ impl Track {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct WindowSize(NonZeroU32);
+pub struct WindowSize(u32);
 
 impl WindowSize {
     pub fn new(size: u32) -> Result<Self, GpsAnalyzerError> {
@@ -51,13 +50,11 @@ impl WindowSize {
         if size.is_multiple_of(2) {
             return Err(GpsAnalyzerError::WindowSizeNotOdd);
         }
-        NonZeroU32::new(size)
-            .ok_or(GpsAnalyzerError::WindowSizeTooSmall)
-            .map(WindowSize)
+        Ok(WindowSize(size))
     }
 
     pub fn get(&self) -> u32 {
-        self.0.get()
+        self.0
     }
 }
 
@@ -104,6 +101,11 @@ pub struct IntervalSummary {
     pub distance_km: f64,
     pub average_speed_kmh: f64,
     pub average_power_watts: Option<f64>,
+}
+
+pub fn fmt_hhmmss(total_secs: f64) -> String {
+    let secs = total_secs as u64;
+    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
 }
 
 #[derive(Error, Debug)]

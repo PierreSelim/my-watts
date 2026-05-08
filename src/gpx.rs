@@ -56,7 +56,9 @@ pub fn parse_gpx(content: &str) -> Result<Track, GpsAnalyzerError> {
                         })?
                         .with_timezone(&chrono::Utc)
                 } else {
-                    chrono::Utc::now()
+                    return Err(GpsAnalyzerError::ParseError(
+                        "track point is missing a timestamp".to_string(),
+                    ));
                 };
 
                 points.push(GpsPoint {
@@ -69,6 +71,7 @@ pub fn parse_gpx(content: &str) -> Result<Track, GpsAnalyzerError> {
         }
     }
 
+    points.sort_by_key(|p| p.timestamp);
     points.dedup_by_key(|p| p.timestamp);
 
     Track::new(points)
@@ -125,6 +128,23 @@ mod tests {
     fn test_parse_gpx_invalid() {
         let gpx_content = "not xml";
         assert!(parse_gpx(gpx_content).is_err());
+    }
+
+    #[test]
+    fn test_parse_gpx_rejects_point_without_timestamp() {
+        let gpx_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1">
+    <trk>
+        <trkseg>
+            <trkpt lat="40.0" lon="-120.0">
+                <ele>100.0</ele>
+            </trkpt>
+        </trkseg>
+    </trk>
+</gpx>"#;
+
+        let err = parse_gpx(gpx_content).unwrap_err();
+        assert!(err.to_string().contains("missing a timestamp"));
     }
 
     #[test]
