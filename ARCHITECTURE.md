@@ -9,12 +9,15 @@
 
 ```
 src/
-├── lib.rs           # Public API
-├── main.rs          # CLI entry point
+├── lib.rs           # Public API: GpsPoint, Track, AnalyzePoint, error types
+├── main.rs          # CLI entry point, command dispatch
 ├── cli.rs           # Argument parsing with clap
 ├── gpx.rs           # GPX file parsing
 ├── smoothing.rs     # Savitzky-Golay implementation
-└── csv.rs           # CSV output writer
+├── analyze.rs       # Per-point metrics and interval bucketing
+├── power.rs         # Physics-based power estimation
+├── csv.rs           # CSV output writers
+└── tui.rs           # Interactive ratatui terminal plot
 ```
 
 ## Key Types
@@ -31,6 +34,24 @@ struct GpsPoint {
 
 ### `Track`
 Collection of ordered `GpsPoint`s representing a continuous ride.
+
+### `AnalyzePoint`
+One enriched record per GPS point, produced by `analyze::analyze_track`:
+```rust
+struct AnalyzePoint {
+    timestamp: DateTime,
+    seconds_from_start: f64,
+    moving_seconds_from_start: f64,
+    raw_lat: f64, raw_lon: f64,
+    smoothed_lat: f64, smoothed_lon: f64,
+    smoothed_alt: Option<f64>,      // from Savitzky-Golay smoothed track
+    instant_speed_kmh: f64,
+    average_speed_kmh: f64,
+    distance_km: f64,
+    power_smooth_watts: Option<f64>,
+    cumulative_energy_kj: Option<f64>,
+}
+```
 
 ### `WindowSize`
 Newtype wrapper ensuring odd integers >= 3:
@@ -49,13 +70,24 @@ struct SavitzkyGolayConfig {
 
 ## Data Flow
 
+**smooth / power / analyze commands:**
 ```
-main() 
-  → parse_args() 
-    → load_gpx() → Track
-      → smooth_track(config) → SmoothedTrack
-        → write_csv() → stdout/file
+load_gpx() → Track
+  → smooth_track()  → smoothed Track
+    → compute_power() → Vec<PowerPoint>
+      → analyze_track() → (Vec<AnalyzePoint>, Vec<IntervalSummary>)
+        → write_analyze_csv() / write_intervals_csv()
 ```
+
+**plot command** (no CSV output):
+```
+load_gpx() → smooth → compute_power → analyze_track
+  → build_plot_data() → PlotData
+    → run_tui()   (ratatui event loop, q/Esc to exit)
+```
+
+### Altitude through the pipeline
+`GpsPoint.alt` is smoothed by Savitzky-Golay alongside lat/lon. The smoothed value is stored as `AnalyzePoint.smoothed_alt`. Elevation gain (sum of positive consecutive deltas) is derived from this field both in the CLI summary and in `PlotData.summary`. In the TUI, altitude is normalized to the speed y-range for overlay on the speed chart; the actual min–max is shown in the panel title.
 
 ## Error Handling
 - All fallible operations return `Result<T, E>`
@@ -70,7 +102,6 @@ main()
 5. **Proven**: Well-established in signal processing
 
 ## Future Extensibility
-- `analyze` subcommand: calculate distance, elevation gain, speed statistics
 - `compare` subcommand: visualize original vs smoothed tracks
 - Alternative algorithms: Kalman filter under `--algorithm=kalman`
 - Map matching: snap to road networks if available

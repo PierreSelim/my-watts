@@ -162,15 +162,24 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
         .last()
         .and_then(|p| p.cumulative_energy_kj)
         .unwrap_or(0.0);
+    let total_elevation_gain_m: f64 = analyze_points
+        .windows(2)
+        .filter_map(|w| {
+            let curr = w[1].smoothed_alt?;
+            let prev = w[0].smoothed_alt?;
+            Some((curr - prev).max(0.0))
+        })
+        .sum();
 
     eprintln!(
-        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal",
+        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal | Elevation: {:.0} m",
         fmt_hhmmss(elapsed_secs),
         fmt_hhmmss(moving_secs),
         total_distance_km,
         avg_speed_kmh,
         avg_power_watts,
-        total_calories_kcal
+        total_calories_kcal,
+        total_elevation_gain_m,
     );
     eprintln!(
         "{} points → {:?}\n{} interval rows → {:?}",

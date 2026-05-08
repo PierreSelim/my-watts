@@ -6,7 +6,8 @@ A Rust tool to analyze and correct GPS drift in GPX files from bike tracking app
 
 - **GPS Drift Correction**: Uses Savitzky-Golay polynomial smoothing to reduce GPS noise while preserving route features
 - **Power Estimation**: Estimates cycling power output from physics (gravity, rolling resistance, air drag)
-- **Ride Analysis**: Produces enriched per-point metrics and interval summaries at multiple time/distance windows
+- **Ride Analysis**: Produces enriched per-point metrics and interval summaries at multiple time/distance windows; reports total elevation gain
+- **Interactive Plot**: Terminal chart showing speed, altitude profile, and power over time
 - **Flexible Configuration**: Tunable smoothing, bike presets, and per-user defaults in `config.toml`
 
 ## Building
@@ -94,13 +95,16 @@ cargo run --release -- plot <INPUT.gpx> [OPTIONS]
 
 Runs the full analysis pipeline and renders a live ratatui chart in the terminal. Press `q` or `Esc` to quit. No output files are written.
 
-The power panel shows two series:
+The top panel combines speed and altitude:
+- **cyan** — instant speed (km/h)
+- **green** — cumulative average speed (km/h)
+- **light blue** — altitude profile, normalized to the speed y-range; actual altitude range shown in the panel title
+
+The bottom panel shows power:
 - **yellow** — smoothed instant power (`--smooth-window` rolling average)
 - **green** — cumulative average power over moving time
 
-The speed panel shows:
-- **cyan** — instant speed
-- **green** — cumulative average speed
+The status bar shows distance, elapsed time, moving time, average speed, average power, and total elevation gain.
 
 Options:
 

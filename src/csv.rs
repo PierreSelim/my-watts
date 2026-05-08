@@ -217,6 +217,7 @@ mod tests {
             raw_lon: 2.0,
             smoothed_lat: 48.0001,
             smoothed_lon: 2.0001,
+            smoothed_alt: None,
             instant_speed_kmh: 30.0,
             average_speed_kmh: 28.0,
             distance_km,

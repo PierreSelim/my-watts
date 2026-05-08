@@ -247,10 +247,12 @@ Bucket assignment:
 After writing both files, always printed to stderr:
 
 ```
-Distance: X.XX km | Avg speed: X.X km/h | Avg power: X W
+Elapsed: HH:MM:SS | Moving: HH:MM:SS | Distance: X.XX km | Avg speed: X.X km/h | Avg power: X W | Calories: X kcal | Elevation: X m
 N points → input.analyze.csv
 M interval rows → input.intervals.csv
 ```
+
+`Elevation` is the total elevation gain (sum of positive altitude deltas over consecutive smoothed points), in metres. It is always printed; it is 0 when no elevation data is present.
 
 ### Error Handling
 
@@ -303,23 +305,26 @@ No output files are written.
 Two chart panels stacked vertically, with a one-line status bar below:
 
 ```
-┌─────────────────────────────────────────┐
-│  Power (W)                              │  ~57% of height
-│    yellow = smoothed instant power      │
-│    green  = cumulative average power    │
-├─────────────────────────────────────────┤
-│  Speed (km/h)                           │  ~40% of height
-│    cyan  = instant speed                │
-│    green = cumulative average speed     │
-├─────────────────────────────────────────┤
-│  Dist | Elapsed | Moving | Avg speed | Avg power | [q] quit  │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  Speed (km/h)  ·  Altitude: X–Y m                  │  ~50% of height
+│    cyan       = instant speed                       │
+│    green      = cumulative average speed            │
+│    light blue = altitude profile (normalized)       │
+├─────────────────────────────────────────────────────┤
+│  Power (W)                                          │  ~47% of height
+│    yellow = smoothed instant power                  │
+│    green  = cumulative average power                │
+├─────────────────────────────────────────────────────┤
+│  Dist | Elapsed | Moving | Avg speed | Avg power | Elevation | [q] quit  │
+└─────────────────────────────────────────────────────┘
 ```
 
 - X axis: elapsed time in `HH:MM:SS`, three labels (start / midpoint / end)
-- Y axis (power): rounded up to the nearest 50 W
 - Y axis (speed): rounded up to the nearest 5 km/h
+- Y axis (power): rounded up to the nearest 50 W
+- Altitude is normalized to the speed y-range so it overlays on the same axis; the actual min–max in metres is shown in the panel title. If the GPX contains no elevation data, the altitude series is omitted.
 - Power values where no 4-second window exists are rendered as 0 W
+- Status bar shows total elevation gain (sum of positive altitude deltas); omitted if no elevation data
 
 ### Interaction
 
