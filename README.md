@@ -58,42 +58,18 @@ Example:
 cargo run --release -- power my_ride.gpx --rider-weight 72 --bike gravel -v
 ```
 
-### Analyze a GPX file (enriched CSV + interval summaries)
+### Analyze a GPX file (enriched CSV + interval summaries + interactive plot)
 
 ```bash
 cargo run --release -- analyze <INPUT.gpx> [OPTIONS]
 ```
 
-Produces two output files:
+Produces two output files and then opens an interactive terminal plot:
 
 - `input.analyze.csv` — one row per GPS point with smoothed coordinates, speed, and cumulative distance
 - `input.intervals.csv` — aggregated stats at 7 interval sizes (1/5/10/30 min and 1/5/10 km)
 
-Options:
-
-- `--rider-weight <KG>`: Rider weight in kg (default: 75.0 or value from `config.toml`)
-- `--bike <NAME>`: Bike preset (default: `road` or value from `config.toml`)
-- `--bike-weight <KG>`: Bike weight in kg (default: 10.0)
-- `--window-size <N>`: Savitzky-Golay window size, must be odd (default: 5)
-- `--degree <N>`: Polynomial degree for smoothing (default: 2)
-- `--smooth-window <N>`: Half-window for instant speed and power smoothing — both are computed over `[i-N, i+N]` seconds (default: 5); use 0 for consecutive-point speed
-- `--config <FILE>`: Path to `config.toml`
-- `-o, --output <FILE>`: Override the per-point CSV path
-- `-v, --verbose`: Print ride summary (distance, avg speed, avg power)
-
-Example:
-
-```bash
-cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel -v
-```
-
-### Interactive terminal plot
-
-```bash
-cargo run --release -- plot <INPUT.gpx> [OPTIONS]
-```
-
-Runs the full analysis pipeline and renders a live ratatui chart in the terminal. Press `q` or `Esc` to quit. No output files are written.
+The plot renders a live ratatui chart in the terminal. Press `q` or `Esc` to quit.
 
 The top panel combines speed and altitude:
 - **cyan** — instant speed (km/h)
@@ -113,14 +89,22 @@ Options:
 - `--bike-weight <KG>`: Bike weight in kg (default: 10.0)
 - `--window-size <N>`: Savitzky-Golay window size, must be odd (default: 5)
 - `--degree <N>`: Polynomial degree for smoothing (default: 2)
-- `--smooth-window <N>`: Half-window for instant speed and power smoothing (default: 5)
+- `--smooth-window <N>`: Half-window for instant speed and power smoothing — both are computed over `[i-N, i+N]` seconds (default: 5); use 0 for consecutive-point speed
 - `--config <FILE>`: Path to `config.toml`
-- `-v, --verbose`: Print loading details
+- `-o, --output <FILE>`: Override the per-point CSV path
+- `--no-plot`: Write CSVs and print summary without opening the terminal plot
+- `-v, --verbose`: Print ride summary (distance, avg speed, avg power)
 
 Example:
 
 ```bash
-cargo run --release -- plot my_ride.gpx --rider-weight 72 --bike gravel
+cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel -v
+```
+
+Example (CSV only, no plot):
+
+```bash
+cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel --no-plot
 ```
 
 ## Output Formats
@@ -154,6 +138,8 @@ cargo run --release -- plot my_ride.gpx --rider-weight 72 --bike gravel
 | `instant_speed_kmh` | Speed over `[i−N, i+N]` smoothed points where N = `--smooth-window` (km/h) |
 | `average_speed_kmh` | Cumulative average speed since start (km/h) |
 | `distance_km` | Cumulative distance using smoothed coords (km) |
+| `power_smooth_watts` | Centered rolling average power over `[i−N, i+N]` seconds (W); empty if no power data |
+| `calories_kcal` | Cumulative metabolic energy in kcal (`mechanical_kJ / (0.25 × 4.184)`); empty if no power data |
 
 ### `analyze` — `input.intervals.csv`
 

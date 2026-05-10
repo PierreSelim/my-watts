@@ -168,11 +168,11 @@ timestamp,power_watts,speed_kmh,gradient_pct
 
 ### Problem
 
-The `smooth` and `power` commands produce separate outputs, and neither provides a combined view of a ride's key metrics at a glance. Riders want a single enriched dataset that includes both raw and smoothed coordinates, instant and average speed, cumulative distance, and aggregated summaries across standard time and distance windows.
+The `smooth` and `power` commands produce separate outputs, and neither provides a combined view of a ride's key metrics at a glance. Riders want a single enriched dataset that includes both raw and smoothed coordinates, instant and average speed, cumulative distance, aggregated summaries across standard time and distance windows, and an immediate visual overview without leaving the terminal.
 
 ### Solution
 
-The `analyze` command processes a GPX file in one pass: it smooths the track, computes per-point metrics, estimates power, and groups results into interval buckets at 7 predefined window sizes (1/5/10/30 min and 1/5/10 km). It writes two CSV files and prints a one-line ride summary.
+The `analyze` command processes a GPX file in one pass: it smooths the track, computes per-point metrics, estimates power, groups results into interval buckets at 7 predefined window sizes (1/5/10/30 min and 1/5/10 km), writes two CSV files, prints a one-line ride summary, and opens an interactive terminal plot. Pass `--no-plot` to skip the plot and exit after writing the CSVs.
 
 ### CLI Interface
 
@@ -191,6 +191,7 @@ Options:
   --bike-weight <KG>          Bike weight in kg (default: 10.0)
   --bike <NAME>               Bike preset name (default: config or "road")
   --config <FILE>             Path to config.toml (default: platform config dir)
+  --no-plot                   Write CSVs and print summary without opening the terminal plot
   -v, --verbose               Enable verbose output
   -h, --help                  Print help
 ```
@@ -222,6 +223,7 @@ One row per GPS point, in track order:
 | `average_speed_kmh` | Cumulative average moving speed since start in km/h: `distance_km / (moving_seconds / 3600)`. 0.0 for the first point and while stationary. Rounded to 0.1. Matches what Strava and bike computers report. |
 | `distance_km` | Cumulative distance using smoothed coords in km (rounded to 0.001) |
 | `power_smooth_watts` | Centered rolling average power over `[i−n, i+n]` seconds where `n = --smooth-window` (rounded to 0.1); empty string if no power points fall within the window |
+| `calories_kcal` | Cumulative metabolic energy in kcal, computed as `cumulative_mechanical_kJ / (0.25 × 4.184)` (25% mechanical efficiency, rounded to 0); empty string if no power data |
 
 ### Output: `input.intervals.csv`
 
@@ -238,9 +240,9 @@ All 7 interval types stacked in one file, ordered by type then bucket index:
 | `average_speed_kmh` | `distance_km / (duration_seconds / 3600)`, 0.0 if single-point bucket (rounded to 0.1) |
 | `average_power_watts` | Mean of power_watts for all power points within `[start_timestamp, end_timestamp]`; empty string if not computed (rounded to 0.1) |
 
-Bucket assignment:
-- Time-based: `bucket = floor(seconds_from_start / window_secs)`
-- Distance-based: `bucket = floor(distance_km / window_km)`
+Bucket assignment uses integer arithmetic to avoid floating-point drift at boundaries:
+- Time-based: `bucket = floor(round(seconds_from_start × 1000) / window_ms)` (millisecond precision)
+- Distance-based: `bucket = floor(round(distance_km × 1000) / window_m)` (metre precision)
 
 ### Stdout Summary
 
@@ -259,48 +261,11 @@ M interval rows → input.intervals.csv
 - All errors from `smooth` and `power` apply (invalid GPX, window size constraints, bike not found)
 - Track must have at least 2 points (required for power computation)
 
-### Testing
+### Terminal Plot
 
-- Unit tests for `compute_analyze_points`: first-point zeroes, monotonic distance, raw/smoothed coord preservation, stationary points, average-speed formula consistency
-- Unit tests for `compute_intervals`: correct bucket counts for all 7 specs, duration/distance sums, power averaging, sequential indices, empty input
-- CSV round-trip tests: column count, power-Some vs power-None serialisation
-- Config tests: serde defaults for new fields, TOML override
+After writing both CSVs (unless `--no-plot` is set), an interactive ratatui chart opens in the terminal. The user presses `q` or `Esc` to exit and return to the shell. The terminal is always restored to its original state on exit, including on I/O errors.
 
----
-
-## Feature 4: Interactive Terminal Plot
-
-### Problem
-
-The `analyze` command produces CSV files for external tools, but there is no way to visualise power and speed over time without leaving the terminal or importing data elsewhere.
-
-### Solution
-
-The `plot` command runs the full analysis pipeline and renders an interactive ratatui chart in the terminal. It shows three time-series simultaneously: 4-second rolling average power, instant speed, and cumulative average speed. The user presses `q` or `Esc` to exit and return to the shell.
-
-### CLI Interface
-
-```
-my-watts plot <INPUT> [OPTIONS]
-
-Arguments:
-  INPUT                       GPX file to analyse
-
-Options:
-  --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
-  --degree <N>                Polynomial degree for smoothing (default: 2)
-  --smooth-window <N>         Half-window for instant speed and power smoothing (default: 5)
-  --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
-  --bike-weight <KG>          Bike weight in kg (default: 10.0)
-  --bike <NAME>               Bike preset name (default: config or "road")
-  --config <FILE>             Path to config.toml (default: platform config dir)
-  -v, --verbose               Enable verbose output
-  -h, --help                  Print help
-```
-
-No output files are written.
-
-### Display Layout
+#### Display Layout
 
 Two chart panels stacked vertically, with a one-line status bar below:
 
@@ -326,21 +291,19 @@ Two chart panels stacked vertically, with a one-line status bar below:
 - Power values where no 4-second window exists are rendered as 0 W
 - Status bar shows total elevation gain (sum of positive altitude deltas); omitted if no elevation data
 
-### Interaction
+#### Interaction
 
 | Key | Action |
 |-----|--------|
 | `q` | Quit |
 | `Esc` | Quit |
 
-The terminal is always restored to its original state on exit, including on I/O errors.
-
-### Error Handling
-
-All errors from `analyze` apply (invalid GPX, window size constraints, bike not found).
-
 ### Testing
 
+- Unit tests for `compute_analyze_points`: first-point zeroes, monotonic distance, raw/smoothed coord preservation, stationary points, average-speed formula consistency
+- Unit tests for `compute_intervals`: correct bucket counts for all 7 specs, duration/distance sums, power averaging, sequential indices, empty input
+- CSV round-trip tests: column count, power-Some vs power-None serialisation
+- Config tests: serde defaults for new fields, TOML override
 - Unit tests for `build_plot_data`: series length, x-values, `None` power → 0.0, `Some` power preserved, time bounds, average power computation (including all-`None` case), empty input
 - Unit tests for `compute_y_bounds`: rounding up to next step, exact multiples, all-zero series, lower bound always 0.0
 

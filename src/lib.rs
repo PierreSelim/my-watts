@@ -34,9 +34,27 @@ impl Track {
         self.points.len()
     }
 
+    /// Always returns `false`: `Track::new` rejects empty point lists.
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
+}
+
+const EARTH_RADIUS_M: f64 = 6_371_000.0;
+
+/// Haversine great-circle distance between two GPS points, in metres.
+pub fn haversine_distance(p1: &GpsPoint, p2: &GpsPoint) -> f64 {
+    let lat1 = p1.lat.to_radians();
+    let lat2 = p2.lat.to_radians();
+    let dlat = (p2.lat - p1.lat).to_radians();
+    let dlon = (p2.lon - p1.lon).to_radians();
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    EARTH_RADIUS_M * 2.0 * a.sqrt().asin()
+}
+
+/// Convert mechanical energy in kJ to metabolic energy in kcal (25 % mechanical efficiency).
+pub fn kj_to_kcal(kj: f64) -> f64 {
+    kj / (0.25 * 4.184)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +85,9 @@ pub struct SavitzkyGolayConfig {
 impl SavitzkyGolayConfig {
     pub fn new(window_size: u32, polynomial_degree: u32) -> Result<Self, GpsAnalyzerError> {
         let window_size = WindowSize::new(window_size)?;
+        if polynomial_degree >= window_size.get() {
+            return Err(GpsAnalyzerError::PolynomialDegreeTooLarge);
+        }
         Ok(SavitzkyGolayConfig {
             window_size,
             polynomial_degree,
@@ -177,5 +198,29 @@ mod tests {
     #[test]
     fn test_track_empty() {
         assert!(Track::new(vec![]).is_err());
+    }
+
+    #[test]
+    fn test_savitzky_golay_config_degree_must_be_less_than_window() {
+        assert!(SavitzkyGolayConfig::new(3, 3).is_err());
+        assert!(SavitzkyGolayConfig::new(3, 4).is_err());
+        assert!(SavitzkyGolayConfig::new(5, 5).is_err());
+        assert!(SavitzkyGolayConfig::new(5, 2).is_ok());
+        assert!(SavitzkyGolayConfig::new(3, 0).is_ok());
+        assert!(SavitzkyGolayConfig::new(3, 2).is_ok());
+    }
+
+    #[test]
+    fn test_kj_to_kcal() {
+        let kcal = kj_to_kcal(4.184);
+        assert!((kcal - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_haversine_paris_london() {
+        let paris = GpsPoint { lat: 48.8566, lon: 2.3522, alt: None, timestamp: Utc::now() };
+        let london = GpsPoint { lat: 51.5074, lon: -0.1278, alt: None, timestamp: Utc::now() };
+        let d = haversine_distance(&paris, &london);
+        assert!((d - 343_556.0).abs() < 1.0, "expected ~343556m, got {d:.2}m");
     }
 }

@@ -1,11 +1,11 @@
-use crate::power::{haversine_distance, PowerPoint};
-use crate::{AnalyzePoint, IntervalSummary, Track};
+use crate::power::PowerPoint;
+use crate::{haversine_distance, AnalyzePoint, IntervalSummary, Track};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
 enum IntervalKind {
-    Time { window_secs: f64 },
-    Distance { window_km: f64 },
+    Time { window_ms: i64 },
+    Distance { window_m: i64 },
 }
 
 struct IntervalSpec {
@@ -17,33 +17,31 @@ fn interval_specs() -> Vec<IntervalSpec> {
     vec![
         IntervalSpec {
             label: "1min",
-            kind: IntervalKind::Time { window_secs: 60.0 },
+            kind: IntervalKind::Time { window_ms: 60_000 },
         },
         IntervalSpec {
             label: "5min",
-            kind: IntervalKind::Time { window_secs: 300.0 },
+            kind: IntervalKind::Time { window_ms: 300_000 },
         },
         IntervalSpec {
             label: "10min",
-            kind: IntervalKind::Time { window_secs: 600.0 },
+            kind: IntervalKind::Time { window_ms: 600_000 },
         },
         IntervalSpec {
             label: "30min",
-            kind: IntervalKind::Time {
-                window_secs: 1800.0,
-            },
+            kind: IntervalKind::Time { window_ms: 1_800_000 },
         },
         IntervalSpec {
             label: "1km",
-            kind: IntervalKind::Distance { window_km: 1.0 },
+            kind: IntervalKind::Distance { window_m: 1_000 },
         },
         IntervalSpec {
             label: "5km",
-            kind: IntervalKind::Distance { window_km: 5.0 },
+            kind: IntervalKind::Distance { window_m: 5_000 },
         },
         IntervalSpec {
             label: "10km",
-            kind: IntervalKind::Distance { window_km: 10.0 },
+            kind: IntervalKind::Distance { window_m: 10_000 },
         },
     ]
 }
@@ -80,7 +78,7 @@ pub fn analyze_track(
     moving_speed_threshold_kmh: f64,
     smooth_window_half: usize,
 ) -> (Vec<AnalyzePoint>, Vec<IntervalSummary>) {
-    debug_assert_eq!(raw.len(), smoothed.len());
+    assert_eq!(raw.len(), smoothed.len(), "raw and smoothed track lengths must match");
     let analyze_points = compute_analyze_points(
         raw,
         smoothed,
@@ -226,11 +224,11 @@ fn compute_intervals(
         let mut buckets: BTreeMap<usize, Vec<&AnalyzePoint>> = BTreeMap::new();
         for point in analyze_points {
             let bucket_idx = match &spec.kind {
-                IntervalKind::Time { window_secs } => {
-                    (point.seconds_from_start / window_secs).floor() as usize
+                IntervalKind::Time { window_ms } => {
+                    ((point.seconds_from_start * 1000.0).round() as i64 / window_ms) as usize
                 }
-                IntervalKind::Distance { window_km } => {
-                    (point.distance_km / window_km).floor() as usize
+                IntervalKind::Distance { window_m } => {
+                    ((point.distance_km * 1000.0).round() as i64 / window_m) as usize
                 }
             };
             buckets.entry(bucket_idx).or_default().push(point);

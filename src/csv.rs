@@ -1,9 +1,15 @@
 use crate::power::PowerPoint;
-use crate::{AnalyzePoint, GpsAnalyzerError, IntervalSummary, Track};
+use crate::{kj_to_kcal, AnalyzePoint, GpsAnalyzerError, IntervalSummary, Track};
 use csv::Writer;
 use serde::Serialize;
 use std::fs::File;
 use std::path::Path;
+
+fn flush_writer(writer: &mut Writer<File>) -> Result<(), GpsAnalyzerError> {
+    writer
+        .flush()
+        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {e}")))
+}
 
 #[derive(Serialize)]
 struct CsvRecord {
@@ -32,9 +38,7 @@ pub fn write_csv<P: AsRef<Path>>(track: &Track, path: P) -> Result<(), GpsAnalyz
             .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
     }
 
-    writer
-        .flush()
-        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+    flush_writer(&mut writer)?;
 
     Ok(())
 }
@@ -66,9 +70,7 @@ pub fn write_power_csv<P: AsRef<Path>>(
             .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
     }
 
-    writer
-        .flush()
-        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+    flush_writer(&mut writer)?;
 
     Ok(())
 }
@@ -85,8 +87,6 @@ struct AnalyzeCsvRecord {
     average_speed_kmh: f64,
     distance_km: f64,
     power_smooth_watts: String,
-    // mechanical_kJ / (0.25 efficiency × 4.184 kJ·kcal⁻¹) ≈ mechanical_kJ × 0.957
-    // Stores mechanical work in kJ, which approximates metabolic kcal within ~5%.
     calories_kcal: String,
 }
 
@@ -114,7 +114,7 @@ pub fn write_analyze_csv<P: AsRef<Path>>(
                 .unwrap_or_default(),
             calories_kcal: point
                 .cumulative_energy_kj
-                .map(|e| format!("{:.0}", e))
+                .map(|e| format!("{:.0}", kj_to_kcal(e)))
                 .unwrap_or_default(),
         };
         writer
@@ -122,9 +122,7 @@ pub fn write_analyze_csv<P: AsRef<Path>>(
             .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
     }
 
-    writer
-        .flush()
-        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+    flush_writer(&mut writer)?;
 
     Ok(())
 }
@@ -167,9 +165,7 @@ pub fn write_intervals_csv<P: AsRef<Path>>(
             .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to write CSV record: {}", e)))?;
     }
 
-    writer
-        .flush()
-        .map_err(|e| GpsAnalyzerError::Csv(format!("Failed to flush CSV writer: {}", e)))?;
+    flush_writer(&mut writer)?;
 
     Ok(())
 }
@@ -267,12 +263,13 @@ mod tests {
     fn test_write_analyze_csv_calories_present_when_power_given() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut point = make_analyze_point(10.0, 0.083);
-        point.cumulative_energy_kj = Some(2.0);
+        // 4.184 kJ / (0.25 × 4.184) = exactly 4 kcal
+        point.cumulative_energy_kj = Some(4.184);
         write_analyze_csv(&[point], temp_file.path()).unwrap();
         let content = fs::read_to_string(temp_file.path()).unwrap();
         let mut rdr = csv::Reader::from_reader(content.as_bytes());
         let records: Vec<_> = rdr.records().collect();
-        assert_eq!(records[0].as_ref().unwrap().get(10).unwrap(), "2");
+        assert_eq!(records[0].as_ref().unwrap().get(10).unwrap(), "4");
     }
 
     #[test]

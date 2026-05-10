@@ -65,20 +65,34 @@ impl AppConfig {
         match config_path {
             Some(path) => {
                 let content = std::fs::read_to_string(path).map_err(GpsAnalyzerError::Io)?;
-                toml::from_str(&content).map_err(|e| GpsAnalyzerError::ConfigError(e.to_string()))
+                let config: AppConfig = toml::from_str(&content)
+                    .map_err(|e| GpsAnalyzerError::ConfigError(e.to_string()))?;
+                Ok(Self::merge_with_builtin(config))
             }
             None => {
                 let default_path = Self::default_config_path();
                 if default_path.exists() {
                     let content =
                         std::fs::read_to_string(&default_path).map_err(GpsAnalyzerError::Io)?;
-                    toml::from_str(&content)
-                        .map_err(|e| GpsAnalyzerError::ConfigError(e.to_string()))
+                    let config: AppConfig = toml::from_str(&content)
+                        .map_err(|e| GpsAnalyzerError::ConfigError(e.to_string()))?;
+                    Ok(Self::merge_with_builtin(config))
                 } else {
                     Ok(Self::builtin_defaults())
                 }
             }
         }
+    }
+
+    /// Append any built-in bikes whose name is not already present in `config.bikes`.
+    /// This lets user configs override specific presets while still having access to the rest.
+    fn merge_with_builtin(mut config: AppConfig) -> AppConfig {
+        for bike in Self::builtin_defaults().bikes {
+            if config.find_bike(&bike.name).is_none() {
+                config.bikes.push(bike);
+            }
+        }
+        config
     }
 
     pub fn find_bike(&self, name: &str) -> Option<&BikeConfig> {
@@ -169,10 +183,14 @@ cda = 0.38
         .unwrap();
 
         let config = AppConfig::load_or_default(Some(temp.path())).unwrap();
-        assert_eq!(config.bikes.len(), 1);
-        assert_eq!(config.bikes[0].name, "test-gravel");
-        assert_eq!(config.bikes[0].crr, 0.006);
-        assert_eq!(config.bikes[0].moving_speed_threshold_kmh, 3.0);
+        // User bike is present with correct values
+        let user_bike = config.find_bike("test-gravel").expect("user-defined bike should be present");
+        assert_eq!(user_bike.crr, 0.006);
+        assert_eq!(user_bike.moving_speed_threshold_kmh, 3.0);
+        // Built-in presets are also available (merged in)
+        assert!(config.find_bike("road").is_some());
+        assert!(config.find_bike("gravel").is_some());
+        assert!(config.find_bike("mountain").is_some());
     }
 
     #[test]

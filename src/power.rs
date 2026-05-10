@@ -1,10 +1,9 @@
 use crate::config::BikeConfig;
-use crate::{GpsAnalyzerError, GpsPoint, Track};
+use crate::{haversine_distance, GpsAnalyzerError, GpsPoint, Track};
 use chrono::{DateTime, Utc};
 
 const G: f64 = 9.80665;
 const RHO_AIR: f64 = 1.225;
-const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
 #[derive(Debug, Clone)]
 pub struct PowerConfig {
@@ -78,16 +77,6 @@ fn segment_power(
         speed_ms: speed,
         gradient,
     })
-}
-
-pub fn haversine_distance(p1: &GpsPoint, p2: &GpsPoint) -> f64 {
-    let lat1 = p1.lat.to_radians();
-    let lat2 = p2.lat.to_radians();
-    let dlat = (p2.lat - p1.lat).to_radians();
-    let dlon = (p2.lon - p1.lon).to_radians();
-
-    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-    EARTH_RADIUS_M * 2.0 * a.sqrt().asin()
 }
 
 #[cfg(test)]
@@ -233,15 +222,4 @@ mod tests {
         assert!(compute_power(&track, &config).is_err());
     }
 
-    #[test]
-    fn test_haversine_paris_london() {
-        let paris = make_point(48.8566, 2.3522, 0.0, 0);
-        let london = make_point(51.5074, -0.1278, 0.0, 0);
-        let d = haversine_distance(&paris, &london);
-        assert!(
-            (d - 343_556.0).abs() < 1.0,
-            "expected ~343556m, got {:.2}m",
-            d
-        );
-    }
 }

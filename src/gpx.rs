@@ -72,6 +72,7 @@ pub fn parse_gpx(content: &str) -> Result<Track, GpsAnalyzerError> {
     }
 
     points.sort_by_key(|p| p.timestamp);
+    // Keep the first occurrence of each timestamp (stable after sort = file order).
     points.dedup_by_key(|p| p.timestamp);
 
     Track::new(points)
