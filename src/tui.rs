@@ -330,8 +330,7 @@ fn draw_speed_altitude_panel(frame: &mut Frame, area: Rect, data: &PlotData) {
     frame.render_widget(chart, area);
 }
 
-fn draw_status_bar(frame: &mut Frame, area: Rect, data: &PlotData) {
-    let s = &data.summary;
+pub fn format_status_text(s: &RideSummary) -> String {
     let power_str = s
         .avg_power_watts
         .map(|w| format!("{:.0} W", w))
@@ -350,19 +349,42 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, data: &PlotData) {
         None => ("N/A".to_string(), "N/A".to_string(), "N/A".to_string()),
     };
 
-    let text = format!(
-        " Dist: {:.2} km  |  Elapsed: {}  |  Moving: {}  |  Avg speed: {:.1} km/h  |  Avg power: {}{}  |  [q] quit\n Speed (moving)  |  P25: {}  |  Median: {}  |  P75: {}",
-        s.total_distance_km,
-        crate::fmt_hhmmss(s.elapsed_secs),
-        crate::fmt_hhmmss(s.moving_secs),
-        s.avg_speed_kmh,
-        power_str,
-        elevation_str,
-        p25_str,
-        p50_str,
-        p75_str,
-    );
+    let dist_cell = format!("Dist: {:.2} km", s.total_distance_km);
+    let elapsed_cell = format!("Elapsed: {}", crate::fmt_hhmmss(s.elapsed_secs));
+    let moving_cell = format!("Moving: {}", crate::fmt_hhmmss(s.moving_secs));
+    let avg_speed_cell = format!("Avg speed: {:.1} km/h", s.avg_speed_kmh);
 
+    let speed_label_cell = "Speed (moving)";
+    let p25_cell = format!("P25: {}", p25_str);
+    let median_cell = format!("Median: {}", p50_str);
+    let p75_cell = format!("P75: {}", p75_str);
+
+    let w1 = dist_cell.len().max(speed_label_cell.len());
+    let w2 = elapsed_cell.len().max(p25_cell.len());
+    let w3 = moving_cell.len().max(median_cell.len());
+    let w4 = avg_speed_cell.len().max(p75_cell.len());
+
+    format!(
+        " {dist:<w1$}  |  {elapsed:<w2$}  |  {moving:<w3$}  |  {avg_speed:<w4$}  |  Avg power: {power}{elevation}  |  [q] quit\n {speed_label:<w1$}  |  {p25:<w2$}  |  {median:<w3$}  |  {p75:<w4$}",
+        dist = dist_cell,
+        elapsed = elapsed_cell,
+        moving = moving_cell,
+        avg_speed = avg_speed_cell,
+        power = power_str,
+        elevation = elevation_str,
+        speed_label = speed_label_cell,
+        p25 = p25_cell,
+        median = median_cell,
+        p75 = p75_cell,
+        w1 = w1,
+        w2 = w2,
+        w3 = w3,
+        w4 = w4,
+    )
+}
+
+fn draw_status_bar(frame: &mut Frame, area: Rect, data: &PlotData) {
+    let text = format_status_text(&data.summary);
     let paragraph = Paragraph::new(text).block(Block::default().borders(Borders::ALL));
     frame.render_widget(paragraph, area);
 }
@@ -549,6 +571,119 @@ mod tests {
         ];
         let data = build_plot_data(&points, 0.0);
         assert!(data.average_power_series.iter().all(|(_, w)| *w == 0.0));
+    }
+
+    fn make_summary(
+        total_distance_km: f64,
+        elapsed_secs: f64,
+        moving_secs: f64,
+        avg_speed_kmh: f64,
+        avg_power_watts: Option<f64>,
+        total_elevation_gain_m: Option<f64>,
+        moving_speed_quartiles_kmh: Option<Quartiles>,
+    ) -> RideSummary {
+        RideSummary {
+            total_distance_km,
+            elapsed_secs,
+            moving_secs,
+            avg_speed_kmh,
+            avg_power_watts,
+            total_elevation_gain_m,
+            moving_speed_quartiles_kmh,
+        }
+    }
+
+    /// Byte offsets of `|` in a line.
+    fn pipe_positions(line: &str) -> Vec<usize> {
+        line.match_indices('|').map(|(i, _)| i).collect()
+    }
+
+    #[test]
+    fn test_format_status_text_pipes_align_full_data() {
+        let summary = make_summary(
+            42.34,
+            3725.0,
+            3500.0,
+            22.5,
+            Some(180.0),
+            Some(320.0),
+            Some(Quartiles {
+                p25: 18.2,
+                p50: 22.0,
+                p75: 26.4,
+            }),
+        );
+        let text = format_status_text(&summary);
+        let lines: Vec<&str> = text.split('\n').collect();
+        assert_eq!(lines.len(), 2);
+
+        let p1 = pipe_positions(lines[0]);
+        let p2 = pipe_positions(lines[1]);
+        // Line 2 has 3 pipes (4 cells); line 1 has more. First 3 must align.
+        assert_eq!(p2.len(), 3);
+        assert!(p1.len() >= 3);
+        assert_eq!(&p1[..3], &p2[..]);
+    }
+
+    #[test]
+    fn test_format_status_text_pipes_align_without_elevation() {
+        let summary = make_summary(
+            10.0,
+            1800.0,
+            1750.0,
+            21.0,
+            Some(150.0),
+            None,
+            Some(Quartiles {
+                p25: 15.0,
+                p50: 20.0,
+                p75: 25.0,
+            }),
+        );
+        let text = format_status_text(&summary);
+        let lines: Vec<&str> = text.split('\n').collect();
+        let p1 = pipe_positions(lines[0]);
+        let p2 = pipe_positions(lines[1]);
+        assert_eq!(&p1[..3], &p2[..]);
+        // No elevation cell: line 1 has exactly 5 pipes (Dist|Elapsed|Moving|AvgSpeed|AvgPower|quit).
+        assert_eq!(p1.len(), 5);
+        assert!(!lines[0].contains("Elevation"));
+    }
+
+    #[test]
+    fn test_format_status_text_pipes_align_without_power() {
+        let summary = make_summary(
+            5.0,
+            600.0,
+            580.0,
+            18.0,
+            None,
+            Some(100.0),
+            Some(Quartiles {
+                p25: 10.0,
+                p50: 15.0,
+                p75: 20.0,
+            }),
+        );
+        let text = format_status_text(&summary);
+        let lines: Vec<&str> = text.split('\n').collect();
+        let p1 = pipe_positions(lines[0]);
+        let p2 = pipe_positions(lines[1]);
+        assert_eq!(&p1[..3], &p2[..]);
+        assert!(lines[0].contains("Avg power: N/A"));
+    }
+
+    #[test]
+    fn test_format_status_text_pipes_align_without_quartiles() {
+        let summary = make_summary(2.0, 120.0, 100.0, 9.0, None, None, None);
+        let text = format_status_text(&summary);
+        let lines: Vec<&str> = text.split('\n').collect();
+        let p1 = pipe_positions(lines[0]);
+        let p2 = pipe_positions(lines[1]);
+        assert_eq!(&p1[..3], &p2[..]);
+        assert!(lines[1].contains("P25: N/A"));
+        assert!(lines[1].contains("Median: N/A"));
+        assert!(lines[1].contains("P75: N/A"));
     }
 
     #[test]
