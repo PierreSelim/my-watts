@@ -68,7 +68,12 @@ const FIVE_POINT_GPX: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 </gpx>"#;
 
 fn road_bike() -> BikeConfig {
-    BikeConfig { name: "road".to_string(), crr: 0.004, cda: 0.32, moving_speed_threshold_kmh: 3.0 }
+    BikeConfig {
+        name: "road".to_string(),
+        crr: 0.004,
+        cda: 0.32,
+        moving_speed_threshold_kmh: 3.0,
+    }
 }
 
 #[test]
@@ -76,7 +81,11 @@ fn test_analyze_pipeline_invariants() {
     let track = gpx::parse_gpx(FIVE_POINT_GPX).expect("parse GPX");
     let sg = SavitzkyGolayConfig::new(3, 1).unwrap();
     let smoothed = smoothing::smooth_track(&track, sg).unwrap();
-    let pc = power::PowerConfig { rider_weight_kg: 75.0, bike_weight_kg: 10.0, bike: road_bike() };
+    let pc = power::PowerConfig {
+        rider_weight_kg: 75.0,
+        bike_weight_kg: 10.0,
+        bike: road_bike(),
+    };
     let power_pts = power::compute_power(&smoothed, &pc).unwrap();
     assert_eq!(power_pts.len(), 4);
 
@@ -105,7 +114,11 @@ fn test_analyze_csv_roundtrip() {
     let track = gpx::parse_gpx(FIVE_POINT_GPX).expect("parse GPX");
     let sg = SavitzkyGolayConfig::new(3, 1).unwrap();
     let smoothed = smoothing::smooth_track(&track, sg).unwrap();
-    let pc = power::PowerConfig { rider_weight_kg: 75.0, bike_weight_kg: 10.0, bike: road_bike() };
+    let pc = power::PowerConfig {
+        rider_weight_kg: 75.0,
+        bike_weight_kg: 10.0,
+        bike: road_bike(),
+    };
     let power_pts = power::compute_power(&smoothed, &pc).unwrap();
     let (pts, intervals) = analyze::analyze_track(&track, &smoothed, Some(&power_pts), 3.0, 1);
 

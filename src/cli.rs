@@ -1,12 +1,21 @@
 use clap::{Parser, Subcommand};
+use my_watts::config;
 use std::path::{Path, PathBuf};
 
-fn default_output_path(input: &Path, suffix: &str) -> PathBuf {
-    let stem = input
+fn input_stem(input: &Path) -> String {
+    input
         .file_stem()
         .unwrap_or(input.as_os_str())
-        .to_string_lossy();
-    PathBuf::from(format!("{}.{}", stem, suffix))
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_output_path(input: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{}", input_stem(input), suffix))
+}
+
+fn analysis_output_path(input: &Path, suffix: &str) -> PathBuf {
+    config::analysis_dir().join(format!("{}.{}", input_stem(input), suffix))
 }
 
 #[derive(Parser)]
@@ -146,10 +155,10 @@ impl AnalyzeCommand {
     pub fn analyze_output_path(&self) -> PathBuf {
         self.output
             .clone()
-            .unwrap_or_else(|| default_output_path(&self.input, "analyze.csv"))
+            .unwrap_or_else(|| analysis_output_path(&self.input, "analyze.csv"))
     }
 
     pub fn intervals_output_path(&self) -> PathBuf {
-        default_output_path(&self.input, "intervals.csv")
+        analysis_output_path(&self.input, "intervals.csv")
     }
 }

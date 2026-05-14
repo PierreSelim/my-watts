@@ -135,6 +135,11 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
     let analyze_path = cmd.analyze_output_path();
     let intervals_path = cmd.intervals_output_path();
 
+    for path in [&analyze_path, &intervals_path] {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(GpsAnalyzerError::Io)?;
+        }
+    }
     csv::write_analyze_csv(&analyze_points, &analyze_path)?;
     csv::write_intervals_csv(&intervals, &intervals_path)?;
 
@@ -185,6 +190,15 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
         total_calories_kcal,
         total_elevation_gain_m,
     );
+
+    match tui::moving_speed_quartiles(&analyze_points, moving_speed_threshold_kmh) {
+        Some(q) => eprintln!(
+            "Speed (moving) | P25: {:.1} km/h | Median: {:.1} km/h | P75: {:.1} km/h",
+            q.p25, q.p50, q.p75,
+        ),
+        None => eprintln!("Speed (moving) | P25: N/A | Median: N/A | P75: N/A"),
+    }
+
     eprintln!(
         "{} points → {:?}\n{} interval rows → {:?}",
         analyze_points.len(),
@@ -194,7 +208,7 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
     );
 
     if !cmd.no_plot {
-        let plot_data = tui::build_plot_data(&analyze_points);
+        let plot_data = tui::build_plot_data(&analyze_points, moving_speed_threshold_kmh);
         tui::run_tui(&plot_data)?;
     }
 

@@ -7,6 +7,7 @@ pub mod csv;
 pub mod gpx;
 pub mod power;
 pub mod smoothing;
+pub mod stats;
 pub mod tui;
 
 #[derive(Debug, Clone, Copy)]
@@ -126,7 +127,12 @@ pub struct IntervalSummary {
 
 pub fn fmt_hhmmss(total_secs: f64) -> String {
     let secs = total_secs as u64;
-    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 #[derive(Error, Debug)]
@@ -218,9 +224,22 @@ mod tests {
 
     #[test]
     fn test_haversine_paris_london() {
-        let paris = GpsPoint { lat: 48.8566, lon: 2.3522, alt: None, timestamp: Utc::now() };
-        let london = GpsPoint { lat: 51.5074, lon: -0.1278, alt: None, timestamp: Utc::now() };
+        let paris = GpsPoint {
+            lat: 48.8566,
+            lon: 2.3522,
+            alt: None,
+            timestamp: Utc::now(),
+        };
+        let london = GpsPoint {
+            lat: 51.5074,
+            lon: -0.1278,
+            alt: None,
+            timestamp: Utc::now(),
+        };
         let d = haversine_distance(&paris, &london);
-        assert!((d - 343_556.0).abs() < 1.0, "expected ~343556m, got {d:.2}m");
+        assert!(
+            (d - 343_556.0).abs() < 1.0,
+            "expected ~343556m, got {d:.2}m"
+        );
     }
 }

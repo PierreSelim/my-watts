@@ -29,7 +29,9 @@ fn interval_specs() -> Vec<IntervalSpec> {
         },
         IntervalSpec {
             label: "30min",
-            kind: IntervalKind::Time { window_ms: 1_800_000 },
+            kind: IntervalKind::Time {
+                window_ms: 1_800_000,
+            },
         },
         IntervalSpec {
             label: "1km",
@@ -53,14 +55,10 @@ fn advance_power_window(
     start: &mut usize,
     end: &mut usize,
 ) -> Option<f64> {
-    while *end < pp.len()
-        && (pp[*end].timestamp - smooth_ts).num_milliseconds() <= half_window_ms
-    {
+    while *end < pp.len() && (pp[*end].timestamp - smooth_ts).num_milliseconds() <= half_window_ms {
         *end += 1;
     }
-    while *start < *end
-        && (smooth_ts - pp[*start].timestamp).num_milliseconds() > half_window_ms
-    {
+    while *start < *end && (smooth_ts - pp[*start].timestamp).num_milliseconds() > half_window_ms {
         *start += 1;
     }
     if *start >= *end {
@@ -78,7 +76,11 @@ pub fn analyze_track(
     moving_speed_threshold_kmh: f64,
     smooth_window_half: usize,
 ) -> (Vec<AnalyzePoint>, Vec<IntervalSummary>) {
-    assert_eq!(raw.len(), smoothed.len(), "raw and smoothed track lengths must match");
+    assert_eq!(
+        raw.len(),
+        smoothed.len(),
+        "raw and smoothed track lengths must match"
+    );
     let analyze_points = compute_analyze_points(
         raw,
         smoothed,

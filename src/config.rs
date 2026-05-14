@@ -42,6 +42,23 @@ impl Default for AppConfig {
     }
 }
 
+pub fn my_watts_home_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".my-watts")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".my-watts")
+    }
+}
+
+pub fn analysis_dir() -> PathBuf {
+    my_watts_home_dir().join("analysis")
+}
+
 impl AppConfig {
     pub fn default_config_path() -> PathBuf {
         #[cfg(target_os = "windows")]
@@ -184,7 +201,9 @@ cda = 0.38
 
         let config = AppConfig::load_or_default(Some(temp.path())).unwrap();
         // User bike is present with correct values
-        let user_bike = config.find_bike("test-gravel").expect("user-defined bike should be present");
+        let user_bike = config
+            .find_bike("test-gravel")
+            .expect("user-defined bike should be present");
         assert_eq!(user_bike.crr, 0.006);
         assert_eq!(user_bike.moving_speed_threshold_kmh, 3.0);
         // Built-in presets are also available (merged in)

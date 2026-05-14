@@ -185,11 +185,36 @@ mod tests {
     #[test]
     fn test_smooth_partial_altitude_falls_back_to_raw() {
         let points = vec![
-            GpsPoint { lat: 1.0, lon: 0.0, alt: Some(100.0), timestamp: Utc::now() },
-            GpsPoint { lat: 2.0, lon: 0.0, alt: Some(110.0), timestamp: Utc::now() },
-            GpsPoint { lat: 3.0, lon: 0.0, alt: None, timestamp: Utc::now() },
-            GpsPoint { lat: 4.0, lon: 0.0, alt: Some(130.0), timestamp: Utc::now() },
-            GpsPoint { lat: 5.0, lon: 0.0, alt: Some(140.0), timestamp: Utc::now() },
+            GpsPoint {
+                lat: 1.0,
+                lon: 0.0,
+                alt: Some(100.0),
+                timestamp: Utc::now(),
+            },
+            GpsPoint {
+                lat: 2.0,
+                lon: 0.0,
+                alt: Some(110.0),
+                timestamp: Utc::now(),
+            },
+            GpsPoint {
+                lat: 3.0,
+                lon: 0.0,
+                alt: None,
+                timestamp: Utc::now(),
+            },
+            GpsPoint {
+                lat: 4.0,
+                lon: 0.0,
+                alt: Some(130.0),
+                timestamp: Utc::now(),
+            },
+            GpsPoint {
+                lat: 5.0,
+                lon: 0.0,
+                alt: Some(140.0),
+                timestamp: Utc::now(),
+            },
         ];
         let track = Track::new(points).expect("valid track");
         let config = SavitzkyGolayConfig::new(3, 1).expect("valid config");

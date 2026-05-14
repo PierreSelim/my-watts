@@ -221,5 +221,4 @@ mod tests {
         };
         assert!(compute_power(&track, &config).is_err());
     }
-
 }
