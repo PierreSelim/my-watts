@@ -12,10 +12,12 @@ src/
 ├── lib.rs           # Public API: GpsPoint, Track, AnalyzePoint, error types
 ├── main.rs          # CLI entry point, command dispatch
 ├── cli.rs           # Argument parsing with clap
+├── config.rs        # TOML config loading, bike presets, output dir resolution
 ├── gpx.rs           # GPX file parsing
 ├── smoothing.rs     # Savitzky-Golay implementation
 ├── analyze.rs       # Per-point metrics and interval bucketing
 ├── power.rs         # Physics-based power estimation
+├── stats.rs         # Speed quartiles and other descriptive statistics
 ├── csv.rs           # CSV output writers
 └── tui.rs           # Interactive ratatui terminal plot
 ```
@@ -54,11 +56,15 @@ struct AnalyzePoint {
 ```
 
 ### `WindowSize`
-Newtype wrapper ensuring odd integers >= 3:
+Newtype wrapper around `u32` whose constructor enforces "odd and ≥ 3":
 ```rust
-struct WindowSize(NonZeroU32);
+struct WindowSize(u32);
+
+impl WindowSize {
+    pub fn new(size: u32) -> Result<Self, GpsAnalyzerError> { /* … */ }
+}
 ```
-This makes it impossible to construct invalid window sizes at the type level.
+Validation happens in `::new`, so once you hold a `WindowSize` the invariant is guaranteed even though the inner `u32` is unconstrained at the type level.
 
 ### `SavitzkyGolayConfig`
 ```rust
@@ -93,13 +99,6 @@ load_gpx() → smooth → compute_power → analyze_track
 - All fallible operations return `Result<T, E>`
 - Custom error type `GpsAnalyzerError` with variant per error kind
 - CLI catches top-level errors and exits with status 1
-
-## Why Savitzky-Golay?
-1. **No velocity dependency**: Speed is derived from position, creating circular dependency with Kalman filter
-2. **Feature preservation**: Better than simple moving average for preserving route features
-3. **Offline-friendly**: Processes full track at once, no streaming needed
-4. **Tunable**: Window size and degree control smoothing aggressiveness
-5. **Proven**: Well-established in signal processing
 
 ## Future Extensibility
 - `compare` subcommand: visualize original vs smoothed tracks

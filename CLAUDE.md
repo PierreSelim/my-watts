@@ -12,10 +12,31 @@ This is a Rust project that prioritizes:
 
 ## Key Documentation Files
 
-When making decisions or implementing features:
-1. **SPEC.md** — Feature specifications and user-facing requirements. Check this before changing behavior.
-2. **ARCHITECTURE.md** — Technical decisions, design rationale, and system boundaries. Read this to understand why code is structured as it is.
-3. **README.md** — Build commands, run commands, and usage examples. Keep this in sync with actual commands.
+The three top-level docs have distinct, non-overlapping roles. Respect them when reading *and* when updating:
+
+1. **README.md** — Short project description, how to build, how to run, what files are produced and where. No exhaustive option tables, no algorithm rationale, no struct definitions. Link to SPEC/ARCHITECTURE for detail.
+2. **SPEC.md** — Per-feature specifications: problem, solution, **algorithm choices and rationale**, full CLI option lists, output column definitions, error handling, testing notes. This is the source of truth for *what the tool does and why that approach*.
+3. **ARCHITECTURE.md** — Technical design: module layout, key types, data flow, error-handling strategy, future extensibility, testing strategy. This is the source of truth for *how the code is organized*.
+
+### Where each kind of change belongs
+
+| Kind of change | File to update |
+|---|---|
+| New/renamed CLI flag, default value, or behavior | SPEC.md (CLI Interface section of the relevant feature) + a one-line example in README if it's a common flag |
+| New output column, file, or output location | SPEC.md (Output section) + README output table |
+| Algorithm change, new algorithm choice, or rationale for picking one | SPEC.md (Algorithm Choice section) — **never** in ARCHITECTURE.md |
+| New or renamed module under `src/` | ARCHITECTURE.md module tree |
+| New or changed public type/struct/enum | ARCHITECTURE.md "Key Types" |
+| New data flow path (e.g. new subcommand pipeline) | ARCHITECTURE.md "Data Flow" |
+| New build/test/lint command | README.md "Testing & Code Quality" + Development Commands section below |
+| Feature that is designed but not yet implemented | SPEC.md with an explicit "**Status**: planned / partially implemented" banner at the top of the section, listing what is and isn't shipped |
+
+### Rules to keep docs honest
+
+- **No duplication across files.** If something belongs in SPEC, link to it from README rather than copying. If something belongs in ARCHITECTURE, don't restate it in SPEC.
+- **Verify against the code before editing.** Defaults, paths, column lists, and type signatures must match `src/` exactly. When in doubt, grep the code.
+- **Update docs in the same change as the code.** If a PR changes CLI flags or output, the matching SPEC/README edit is part of that PR, not a follow-up.
+- **Mark unimplemented designs explicitly.** A SPEC section without a "planned" banner is a claim that the feature ships today.
 
 ## Development Commands
 

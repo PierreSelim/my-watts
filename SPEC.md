@@ -21,6 +21,14 @@ The Savitzky-Golay filter works by fitting a polynomial through a sliding window
 - Is well-suited for offline GPX analysis
 - Works independently on latitude, longitude, and altitude
 
+#### Why Savitzky-Golay over alternatives?
+
+1. **No velocity dependency**: Kalman filters require velocity as an independent measurement. In GPS tracking, instantaneous velocity is derived from position changes, creating a circular dependency. Savitzky-Golay smooths positions directly without modeling velocity.
+2. **Feature preservation**: Better than simple moving average for sharp turns and elevation changes — the polynomial fit follows local curvature instead of flattening it.
+3. **Offline-friendly**: Processes the full track in one pass, no streaming state required.
+4. **Tunable**: Window size and polynomial degree independently control smoothing aggressiveness.
+5. **Proven**: Well-established in signal processing literature.
+
 ### CLI Interface
 
 ```
@@ -102,12 +110,15 @@ Falls back to built-in defaults if no file is found.
 name = "road"
 crr  = 0.004   # rolling resistance coefficient
 cda  = 0.32    # drag area Cd×A in m²
+moving_speed_threshold_kmh = 3.0   # optional, default 3.0 — below this the rider is considered stopped
 
 [[bikes]]
 name = "gravel"
 crr  = 0.006
 cda  = 0.40
 ```
+
+`moving_speed_threshold_kmh` is optional (per-bike, default 3.0) and is used by the `analyze` command to distinguish moving from stationary time when computing averages.
 
 Built-in bike presets:
 
@@ -183,7 +194,7 @@ Arguments:
   INPUT                       GPX file to analyse
 
 Options:
-  -o, --output <FILE>         Output CSV for per-point data (default: input.analyze.csv)
+  -o, --output <FILE>         Output CSV for per-point data (default: see "Output location" below)
   --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
   --degree <N>                Polynomial degree for smoothing (default: 2)
   --smooth-window <N>         Half-window for instant speed and power smoothing (default: 5)
@@ -196,7 +207,14 @@ Options:
   -h, --help                  Print help
 ```
 
-The intervals output path is always `{INPUT_STEM}.intervals.csv` and cannot be overridden separately.
+### Output location
+
+Both CSVs are written to the `analysis` subdirectory of the my-watts home dir:
+
+- Windows: `%USERPROFILE%\.my-watts\analysis\{INPUT_STEM}.analyze.csv` and `…\{INPUT_STEM}.intervals.csv`
+- Unix: `~/.my-watts/analysis/{INPUT_STEM}.analyze.csv` and `~/.my-watts/analysis/{INPUT_STEM}.intervals.csv`
+
+The directory is created on demand. `-o, --output` overrides the per-point CSV path only; the intervals path always uses the default location and cannot be overridden separately.
 
 ### Configuration Defaults
 
@@ -250,11 +268,16 @@ After writing both files, always printed to stderr:
 
 ```
 Elapsed: HH:MM:SS | Moving: HH:MM:SS | Distance: X.XX km | Avg speed: X.X km/h | Avg power: X W | Calories: X kcal | Elevation: X m
-N points → input.analyze.csv
-M interval rows → input.intervals.csv
+Speed (moving) | P25: X.X km/h | Median: X.X km/h | P75: X.X km/h
+N points → <analyze.csv path>
+M interval rows → <intervals.csv path>
 ```
 
 `Elevation` is the total elevation gain (sum of positive altitude deltas over consecutive smoothed points), in metres. It is always printed; it is 0 when no elevation data is present.
+
+The quartile line reports speed percentiles over moving points only (filtered by the bike's `moving_speed_threshold_kmh`). If no moving points exist, each value is printed as `N/A`.
+
+CSV paths in the last two lines are printed as quoted, debug-formatted `PathBuf` values (e.g. `"C:\\Users\\…\\my-ride.analyze.csv"`).
 
 ### Error Handling
 
@@ -309,7 +332,16 @@ Two chart panels stacked vertically, with a one-line status bar below:
 
 ---
 
-## Feature 5: Segment-Based Power Analysis
+## Feature 4: Segment-Based Power Analysis (partially implemented)
+
+> **Status**: the core segment-aggregation concept is shipped as the `intervals.csv` output of Feature 3 — power, speed, distance, and duration are aggregated at fixed windows (1/5/10/30 min and 1/5/10 km) by `my-watts analyze`. What this section adds on top of `analyze` is **not yet implemented**:
+>
+> - User-configurable window sizes (`--segment-distance-m`, `--segment-time-s`)
+> - Entire-ride summary segment (`--segment-entire-ride`)
+> - Per-segment `max_power_watts`, `avg_gradient_pct`, and `normalized_power_watts` columns
+> - Physics refinements: `--wind-speed-kmh`, `--drivetrain-loss`, `--elevation-density`
+>
+> All segment computation lives in the `analyze` subcommand — `my-watts power` only produces the raw per-segment CSV and does not aggregate. Treat the rest of this section as the design target for `analyze` extensions.
 
 ### Problem
 
@@ -321,22 +353,25 @@ Aggregate per-point `PowerPoint` data into `Segment` records. Each segment repor
 
 For the full implementation design — including the segmentation algorithm, Normalized Power calculation, formula extensions (elevation-dependent air density, wind, drivetrain loss), CLI flags, and CSV output format — see **[docs/power-segment-analysis.md](docs/power-segment-analysis.md)**.
 
-### CLI Interface
+### CLI Interface (planned)
+
+All segment computation is owned by `my-watts analyze` — these flags extend the existing `analyze` subcommand rather than reviving `my-watts power` for aggregation:
 
 ```
-my-watts power <INPUT> [OPTIONS]
+my-watts analyze <INPUT> [OPTIONS]
 
-Segment options (any combination):
-  --segment-distance-m <M>    Segment by distance, interval in metres (e.g. 1000)
-  --segment-time-s <S>        Segment by time, interval in seconds (e.g. 600)
+Segment options (any combination, in addition to the fixed-window intervals already produced):
+  --segment-distance-m <M>    Extra segment by distance, interval in metres (e.g. 1000)
+  --segment-time-s <S>        Extra segment by time, interval in seconds (e.g. 600)
   --segment-entire-ride       Include a single entire-ride summary segment
-  --segments-output <FILE>    Output CSV for segments (default: input.segments.csv)
 
 Physics refinement options:
   --wind-speed-kmh <KMH>      Constant wind speed; positive = headwind (default: 0)
   --drivetrain-loss <FRAC>    Drivetrain loss fraction, e.g. 0.03 (default: 0.0)
   --elevation-density         Use altitude-dependent air density
 ```
+
+Custom segments are appended to `intervals.csv` (same file, same columns plus the new `max_power_watts`, `avg_gradient_pct`, `normalized_power_watts`). No new `--segments-output` flag is introduced.
 
 ### Output Format
 
