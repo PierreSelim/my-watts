@@ -198,6 +198,7 @@ Options:
   --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
   --degree <N>                Polynomial degree for smoothing (default: 2)
   --smooth-window <N>         Half-window for instant speed and power smoothing (default: 5)
+  --stop-buffer-secs <SECS>   Seconds to exclude before and after each stop for Training speed (default: 10.0)
   --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
   --bike-weight <KG>          Bike weight in kg (default: 10.0)
   --bike <NAME>               Bike preset name (default: config or "road")
@@ -267,13 +268,15 @@ Bucket assignment uses integer arithmetic to avoid floating-point drift at bound
 After writing both files, always printed to stderr:
 
 ```
-Elapsed: HH:MM:SS | Moving: HH:MM:SS | Distance: X.XX km | Avg speed: X.X km/h | Avg power: X W | Calories: X kcal | Elevation: X m
+Elapsed: HH:MM:SS | Moving: HH:MM:SS | Distance: X.XX km | Avg speed: X.X km/h | Training speed: X.X km/h | Avg power: X W | Calories: X kcal | Elevation: X m
 Speed (moving) | P25: X.X km/h | Median: X.X km/h | P75: X.X km/h
 N points → <analyze.csv path>
 M interval rows → <intervals.csv path>
 ```
 
 `Elevation` is the total elevation gain (sum of positive altitude deltas over consecutive smoothed points), in metres. It is always printed; it is 0 when no elevation data is present.
+
+**Training speed** is the average speed computed over time segments that are not within `--stop-buffer-secs` seconds of any stop. Stops are detected using the bike's `moving_speed_threshold_kmh`. This metric strips deceleration and acceleration phases around stops, giving a cleaner picture of riding effort than `Avg speed`. See "Algorithm: Training Speed" below.
 
 The quartile line reports speed percentiles over moving points only (filtered by the bike's `moving_speed_threshold_kmh`). If no moving points exist, each value is printed as `N/A`.
 
@@ -303,7 +306,7 @@ Two chart panels stacked vertically, with a one-line status bar below:
 │    yellow = smoothed instant power                  │
 │    green  = cumulative average power                │
 ├─────────────────────────────────────────────────────┤
-│  Dist | Elapsed | Moving | Avg speed | Avg power | Elevation | [q] quit  │
+│  Dist | Elapsed | Moving | Avg speed | Training speed | Avg power | Elevation | [q] quit  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -312,7 +315,9 @@ Two chart panels stacked vertically, with a one-line status bar below:
 - Y axis (power): rounded up to the nearest 50 W
 - Altitude is normalized to the speed y-range so it overlays on the same axis; the actual min–max in metres is shown in the panel title. If the GPX contains no elevation data, the altitude series is omitted.
 - Power values where no 4-second window exists are rendered as 0 W
-- Status bar shows total elevation gain (sum of positive altitude deltas); omitted if no elevation data
+- Status bar line 1 shows: Dist, Elapsed, Moving, Avg speed, Training speed, Avg power, Elevation (omitted if no elevation data), [q] quit
+- Status bar line 2 shows: Speed (moving) quartiles — P25, Median, P75; `N/A` when no moving points exist
+- The first four column separators align vertically between the two status bar lines
 
 #### Interaction
 
@@ -321,9 +326,26 @@ Two chart panels stacked vertically, with a one-line status bar below:
 | `q` | Quit |
 | `Esc` | Quit |
 
+### Algorithm: Training Speed
+
+Training speed differs from `Avg speed` in two ways:
+
+1. **Stop detection** — same threshold as `Avg speed` (`moving_speed_threshold_kmh`).
+2. **Buffer exclusion** — additionally excludes `--stop-buffer-secs` seconds before and after every stop, removing deceleration and acceleration phases.
+
+**Two-pass algorithm** (implemented in `analyze::compute_training_speed_kmh`):
+
+1. Scan `analyze_points` and collect contiguous stop intervals as `(start_secs, end_secs)` time ranges.
+2. Expand each interval to `(start - buffer_secs, end + buffer_secs)`. Overlapping buffered intervals remain separate (both exclude their respective zones; the union is implicitly handled during the filter step).
+3. For each consecutive pair of `AnalyzePoint`s, include the segment's `Δdistance` and `Δtime` only when **neither** endpoint's `seconds_from_start` falls inside any buffered zone.
+4. Return `Σdistance_km / (Σtime_secs / 3600)`, or 0.0 if no segments remain.
+
+Setting `--stop-buffer-secs 0` makes Training speed identical to `Avg speed` (excluding full stops only, no deceleration buffer).
+
 ### Testing
 
 - Unit tests for `compute_analyze_points`: first-point zeroes, monotonic distance, raw/smoothed coord preservation, stationary points, average-speed formula consistency
+- Unit tests for `compute_training_speed_kmh`: no stops → ~30 km/h; one stop excluded → training speed ≥ avg speed; all stopped → 0.0; zero buffer → ≈30 km/h on moving track
 - Unit tests for `compute_intervals`: correct bucket counts for all 7 specs, duration/distance sums, power averaging, sequential indices, empty input
 - CSV round-trip tests: column count, power-Some vs power-None serialisation
 - Config tests: serde defaults for new fields, TOML override

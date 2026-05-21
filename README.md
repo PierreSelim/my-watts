@@ -28,6 +28,9 @@ cargo run --release -- power my_ride.gpx --rider-weight 72 --bike gravel
 
 # Full analysis: smooth + power + intervals + interactive plot
 cargo run --release -- analyze my_ride.gpx --rider-weight 72 --bike gravel
+
+# Wider stop buffer for Training speed (default: 10 s)
+cargo run --release -- analyze my_ride.gpx --rider-weight 72 --stop-buffer-secs 20
 ```
 
 ## Output

@@ -142,6 +142,10 @@ pub struct AnalyzeCommand {
     #[arg(long, default_value = "5")]
     pub smooth_window: usize,
 
+    /// Seconds to exclude before and after each stop when computing Training speed (default: 10)
+    #[arg(long, default_value = "10.0")]
+    pub stop_buffer_secs: f64,
+
     /// Skip the interactive terminal plot after writing CSVs
     #[arg(long)]
     pub no_plot: bool,

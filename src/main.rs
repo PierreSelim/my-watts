@@ -156,6 +156,8 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
         .last()
         .map(|p| p.average_speed_kmh)
         .unwrap_or(0.0);
+    let training_speed_kmh =
+        analyze::compute_training_speed_kmh(&analyze_points, moving_speed_threshold_kmh, cmd.stop_buffer_secs);
     let moving_power: Vec<f64> = power_points
         .iter()
         .filter(|p| p.speed_ms * 3.6 >= moving_speed_threshold_kmh)
@@ -181,11 +183,12 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
         .sum();
 
     eprintln!(
-        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal | Elevation: {:.0} m",
+        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Training speed: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal | Elevation: {:.0} m",
         fmt_hhmmss(elapsed_secs),
         fmt_hhmmss(moving_secs),
         total_distance_km,
         avg_speed_kmh,
+        training_speed_kmh,
         avg_power_watts,
         total_calories_kcal,
         total_elevation_gain_m,
@@ -208,7 +211,11 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
     );
 
     if !cmd.no_plot {
-        let plot_data = tui::build_plot_data(&analyze_points, moving_speed_threshold_kmh);
+        let plot_data = tui::build_plot_data(
+            &analyze_points,
+            moving_speed_threshold_kmh,
+            training_speed_kmh,
+        );
         tui::run_tui(&plot_data)?;
     }
 

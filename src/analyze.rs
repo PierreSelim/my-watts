@@ -280,6 +280,65 @@ fn compute_intervals(
     summaries
 }
 
+pub fn compute_training_speed_kmh(
+    analyze_points: &[AnalyzePoint],
+    moving_speed_threshold_kmh: f64,
+    stop_buffer_secs: f64,
+) -> f64 {
+    // Pass 1: collect contiguous stop intervals as (start_secs, end_secs).
+    // Both bounds are timestamps of stopped points so the interval is tight.
+    let mut intervals: Vec<(f64, f64)> = Vec::new();
+    let mut stop_start: Option<f64> = None;
+    let mut last_stop_time = 0.0_f64;
+    for pt in analyze_points {
+        if pt.instant_speed_kmh < moving_speed_threshold_kmh {
+            if stop_start.is_none() {
+                stop_start = Some(pt.seconds_from_start);
+            }
+            last_stop_time = pt.seconds_from_start;
+        } else if let Some(s) = stop_start.take() {
+            intervals.push((s, last_stop_time));
+        }
+    }
+    if let Some(s) = stop_start {
+        intervals.push((s, last_stop_time));
+    }
+
+    // Expand each stop interval by the buffer on both sides, then sort for binary search.
+    let mut buffered: Vec<(f64, f64)> = intervals
+        .iter()
+        .map(|(s, e)| (s - stop_buffer_secs, e + stop_buffer_secs))
+        .collect();
+    buffered.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+    let in_buffer = |t: f64| -> bool {
+        let idx = buffered.partition_point(|(s, _)| *s <= t);
+        idx > 0 && buffered[idx - 1].1 >= t
+    };
+
+    // Pass 2: accumulate distance and time for segments outside all buffered zones.
+    let (dist_km, time_secs) = analyze_points
+        .windows(2)
+        .fold((0.0_f64, 0.0_f64), |(acc_dist, acc_time), w| {
+            let prev = &w[0];
+            let curr = &w[1];
+            if !in_buffer(prev.seconds_from_start) && !in_buffer(curr.seconds_from_start) {
+                (
+                    acc_dist + curr.distance_km - prev.distance_km,
+                    acc_time + curr.seconds_from_start - prev.seconds_from_start,
+                )
+            } else {
+                (acc_dist, acc_time)
+            }
+        });
+
+    if time_secs > 0.0 {
+        dist_km / (time_secs / 3600.0)
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -910,6 +969,143 @@ mod tests {
         assert!(
             spike_narrow > spike_wide,
             "window=1 spike ({spike_narrow:.1}) should exceed window=5 spike ({spike_wide:.1})"
+        );
+    }
+
+    // --- compute_training_speed_kmh tests ---
+
+    fn make_analyze_point_with_speed(
+        seconds: f64,
+        distance_km: f64,
+        speed_kmh: f64,
+    ) -> AnalyzePoint {
+        AnalyzePoint {
+            instant_speed_kmh: speed_kmh,
+            ..make_analyze_point(seconds, distance_km)
+        }
+    }
+
+    #[test]
+    fn test_training_speed_no_stops_positive() {
+        // All points moving at 30 km/h with no stops → training speed ≈ 30 km/h.
+        let step_km = 30.0_f64 / 360.0;
+        let points: Vec<AnalyzePoint> = (0..10)
+            .map(|i| make_analyze_point_with_speed(i as f64 * 10.0, i as f64 * step_km, 30.0))
+            .collect();
+        let training = compute_training_speed_kmh(&points, 3.0, 10.0);
+        // With no stops the buffer has nothing to remove, so training ≈ 30 km/h
+        assert!(
+            (training - 30.0).abs() < 1.0,
+            "training {training:.2} should be close to 30 km/h"
+        );
+    }
+
+    #[test]
+    fn test_training_speed_stop_excluded_raises_speed() {
+        // 30 points: first 10 moving at 30 km/h, next 10 stopped (speed=0), last 10 moving at 30 km/h.
+        // Each step is 10s. The moving segments cover 10 × (30/360) km ≈ 0.833 km each.
+        let step_km = 30.0_f64 / 360.0; // distance per 10-second step at 30 km/h
+        let mut points: Vec<AnalyzePoint> = Vec::new();
+        for i in 0..10usize {
+            points.push(make_analyze_point_with_speed(
+                i as f64 * 10.0,
+                i as f64 * step_km,
+                30.0,
+            ));
+        }
+        let stop_start_dist = points.last().unwrap().distance_km;
+        for i in 0..10usize {
+            let t = 100.0 + i as f64 * 10.0;
+            points.push(make_analyze_point_with_speed(t, stop_start_dist, 0.0));
+        }
+        let resume_dist = stop_start_dist;
+        for i in 0..10usize {
+            let t = 200.0 + i as f64 * 10.0;
+            points.push(make_analyze_point_with_speed(
+                t,
+                resume_dist + i as f64 * step_km,
+                30.0,
+            ));
+        }
+
+        // Compute expected average speed from test geometry (stop time pulls it down).
+        let total_dist_km = points.last().unwrap().distance_km;
+        let total_time_h = points.last().unwrap().seconds_from_start / 3600.0;
+        let expected_avg_speed = total_dist_km / total_time_h;
+        let training = compute_training_speed_kmh(&points, 3.0, 10.0);
+
+        // Training speed strips stop + buffer, so it must exceed the raw avg speed.
+        assert!(
+            training > expected_avg_speed,
+            "training speed {training:.2} should exceed avg speed {expected_avg_speed:.2}"
+        );
+        assert!(training > 0.0, "training speed must be positive");
+    }
+
+    #[test]
+    fn test_training_speed_only_stops_returns_zero() {
+        // All points are stopped → no training segments → returns 0.0.
+        let points: Vec<AnalyzePoint> = (0..5)
+            .map(|i| make_analyze_point_with_speed(i as f64 * 10.0, 0.0, 0.0))
+            .collect();
+        let training = compute_training_speed_kmh(&points, 3.0, 10.0);
+        assert_eq!(training, 0.0);
+    }
+
+    #[test]
+    fn test_training_speed_buffer_boundary_at_last_stopped_point() {
+        // Stop interval must close at the last stopped point, not the first moving point.
+        // Track: moving(0) → stop(10) → moving(20) → moving(30), buffer=0
+        //   Stop interval = [10, 10]; buffered = [10, 10]
+        //   Segment (0,10):  curr=10 IN  → excluded
+        //   Segment (10,20): prev=10 IN  → excluded
+        //   Segment (20,30): both outside → included → 30 km/h
+        let step_km = 30.0_f64 / 360.0;
+        let points = vec![
+            make_analyze_point_with_speed(0.0, 0.0, 30.0),
+            make_analyze_point_with_speed(10.0, step_km, 0.0),
+            make_analyze_point_with_speed(20.0, step_km, 30.0),
+            make_analyze_point_with_speed(30.0, step_km * 2.0, 30.0),
+        ];
+        let training = compute_training_speed_kmh(&points, 3.0, 0.0);
+        assert!(
+            (training - 30.0).abs() < 0.1,
+            "only the post-gap moving segment should contribute; expected 30 km/h, got {training:.2}"
+        );
+    }
+
+    #[test]
+    fn test_training_speed_buffer_excludes_transition_zone() {
+        // A buffer larger than the track duration excludes every segment → 0.0.
+        // Track: moving(0) → stop(10) → moving(20) → moving(30), buffer=25
+        //   Buffered = [10-25, 10+25] = [-15, 35] covers the entire 30-second track.
+        let step_km = 30.0_f64 / 360.0;
+        let points = vec![
+            make_analyze_point_with_speed(0.0, 0.0, 30.0),
+            make_analyze_point_with_speed(10.0, step_km, 0.0),
+            make_analyze_point_with_speed(20.0, step_km, 30.0),
+            make_analyze_point_with_speed(30.0, step_km * 2.0, 30.0),
+        ];
+        let training = compute_training_speed_kmh(&points, 3.0, 25.0);
+        assert_eq!(
+            training, 0.0,
+            "buffer of 25s covers the entire 30s track; expected 0.0, got {training:.2}"
+        );
+    }
+
+    #[test]
+    fn test_training_speed_zero_buffer_moving_only() {
+        // With buffer=0 and all-moving track, training speed equals the direct distance/time ratio.
+        let step_km = 30.0_f64 / 360.0;
+        let points: Vec<AnalyzePoint> = (0..6)
+            .map(|i| make_analyze_point_with_speed(i as f64 * 10.0, i as f64 * step_km, 30.0))
+            .collect();
+        let training = compute_training_speed_kmh(&points, 3.0, 0.0);
+        assert!(training > 0.0);
+        // With no stops and zero buffer, all segments included → speed ≈ 30 km/h
+        assert!(
+            (training - 30.0).abs() < 1.0,
+            "expected ~30 km/h, got {training:.2}"
         );
     }
 }

@@ -26,6 +26,7 @@ pub struct RideSummary {
     pub elapsed_secs: f64,
     pub moving_secs: f64,
     pub avg_speed_kmh: f64,
+    pub training_speed_kmh: f64,
     pub avg_power_watts: Option<f64>,
     pub total_elevation_gain_m: Option<f64>,
     pub moving_speed_quartiles_kmh: Option<Quartiles>,
@@ -65,7 +66,11 @@ pub fn compute_altitude_bounds(series: &[(f64, f64)], step: f64) -> [f64; 2] {
     [lo, hi.max(lo + step)]
 }
 
-pub fn build_plot_data(points: &[AnalyzePoint], moving_speed_threshold_kmh: f64) -> PlotData {
+pub fn build_plot_data(
+    points: &[AnalyzePoint],
+    moving_speed_threshold_kmh: f64,
+    training_speed_kmh: f64,
+) -> PlotData {
     let power_series: Vec<(f64, f64)> = points
         .iter()
         .map(|p| (p.seconds_from_start, p.power_smooth_watts.unwrap_or(0.0)))
@@ -149,6 +154,7 @@ pub fn build_plot_data(points: &[AnalyzePoint], moving_speed_threshold_kmh: f64)
             elapsed_secs,
             moving_secs,
             avg_speed_kmh,
+            training_speed_kmh,
             avg_power_watts,
             total_elevation_gain_m,
             moving_speed_quartiles_kmh,
@@ -353,6 +359,7 @@ pub fn format_status_text(s: &RideSummary) -> String {
     let elapsed_cell = format!("Elapsed: {}", crate::fmt_hhmmss(s.elapsed_secs));
     let moving_cell = format!("Moving: {}", crate::fmt_hhmmss(s.moving_secs));
     let avg_speed_cell = format!("Avg speed: {:.1} km/h", s.avg_speed_kmh);
+    let training_speed_cell = format!("Training speed: {:.1} km/h", s.training_speed_kmh);
 
     let speed_label_cell = "Speed (moving)";
     let p25_cell = format!("P25: {}", p25_str);
@@ -365,11 +372,12 @@ pub fn format_status_text(s: &RideSummary) -> String {
     let w4 = avg_speed_cell.len().max(p75_cell.len());
 
     format!(
-        " {dist:<w1$}  |  {elapsed:<w2$}  |  {moving:<w3$}  |  {avg_speed:<w4$}  |  Avg power: {power}{elevation}  |  [q] quit\n {speed_label:<w1$}  |  {p25:<w2$}  |  {median:<w3$}  |  {p75:<w4$}",
+        " {dist:<w1$}  |  {elapsed:<w2$}  |  {moving:<w3$}  |  {avg_speed:<w4$}  |  {training_speed}  |  Avg power: {power}{elevation}  |  [q] quit\n {speed_label:<w1$}  |  {p25:<w2$}  |  {median:<w3$}  |  {p75:<w4$}",
         dist = dist_cell,
         elapsed = elapsed_cell,
         moving = moving_cell,
         avg_speed = avg_speed_cell,
+        training_speed = training_speed_cell,
         power = power_str,
         elevation = elevation_str,
         speed_label = speed_label_cell,
@@ -425,7 +433,7 @@ mod tests {
             make_point(60.0, 20.0, 15.0, Some(200.0), 0.3),
             make_point(120.0, 25.0, 18.0, Some(250.0), 0.7),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert_eq!(data.power_series.len(), 3);
         assert_eq!(data.average_power_series.len(), 3);
         assert_eq!(data.instant_speed_series.len(), 3);
@@ -438,7 +446,7 @@ mod tests {
             make_point(0.0, 10.0, 10.0, Some(100.0), 0.0),
             make_point(30.0, 20.0, 15.0, Some(200.0), 0.1),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert_eq!(data.power_series[0].0, 0.0);
         assert_eq!(data.power_series[1].0, 30.0);
         assert_eq!(data.instant_speed_series[1].0, 30.0);
@@ -448,14 +456,14 @@ mod tests {
     #[test]
     fn test_build_plot_data_none_power_becomes_zero() {
         let points = vec![make_point(0.0, 0.0, 0.0, None, 0.0)];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert_eq!(data.power_series[0].1, 0.0);
     }
 
     #[test]
     fn test_build_plot_data_some_power_is_preserved() {
         let points = vec![make_point(0.0, 0.0, 0.0, Some(200.0), 0.0)];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert_eq!(data.power_series[0].1, 200.0);
     }
 
@@ -465,7 +473,7 @@ mod tests {
             make_point(0.0, 0.0, 0.0, None, 0.0),
             make_point(3600.0, 30.0, 25.0, Some(300.0), 25.0),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert_eq!(data.time_bounds, [0.0, 3600.0]);
     }
 
@@ -475,7 +483,7 @@ mod tests {
             make_point(0.0, 0.0, 0.0, None, 0.0),
             make_point(60.0, 20.0, 15.0, Some(200.0), 12.5),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert_eq!(data.summary.total_distance_km, 12.5);
     }
 
@@ -485,7 +493,7 @@ mod tests {
             make_point(0.0, 0.0, 0.0, None, 0.0),
             make_point(60.0, 10.0, 8.0, None, 0.1),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert!(data.summary.avg_power_watts.is_none());
     }
 
@@ -495,7 +503,7 @@ mod tests {
             make_point(0.0, 0.0, 0.0, Some(200.0), 0.0),
             make_point(60.0, 20.0, 15.0, Some(200.0), 0.3),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         // energy-based: cumulative_energy_kj * 1000 / moving_secs = 12000 / 54 ≈ 222.2 W
         let expected = 200.0 * 60.0 / (60.0 * 0.9);
         assert!((data.summary.avg_power_watts.unwrap() - expected).abs() < 1e-9);
@@ -503,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_build_plot_data_empty_returns_zero_bounds() {
-        let data = build_plot_data(&[], 0.0);
+        let data = build_plot_data(&[], 0.0, 10.0);
         assert_eq!(data.time_bounds, [0.0, 0.0]);
         assert_eq!(data.power_bounds, [0.0, 50.0]);
         assert_eq!(data.speed_bounds, [0.0, 5.0]);
@@ -521,7 +529,7 @@ mod tests {
         let points: Vec<AnalyzePoint> = (0..5)
             .map(|i| make_point(i as f64 * 10.0, i as f64 * 10.0, 0.0, None, 0.0))
             .collect();
-        let data = build_plot_data(&points, 5.0);
+        let data = build_plot_data(&points, 5.0, 10.0);
         let q = data.summary.moving_speed_quartiles_kmh.unwrap();
         assert!((q.p25 - 17.5).abs() < 1e-9, "p25={}", q.p25);
         assert!((q.p50 - 25.0).abs() < 1e-9, "p50={}", q.p50);
@@ -534,7 +542,7 @@ mod tests {
             make_point(0.0, 1.0, 0.0, None, 0.0),
             make_point(1.0, 2.0, 0.0, None, 0.0),
         ];
-        let data = build_plot_data(&points, 10.0);
+        let data = build_plot_data(&points, 10.0, 10.0);
         assert!(data.summary.moving_speed_quartiles_kmh.is_none());
     }
 
@@ -569,7 +577,7 @@ mod tests {
             make_point(0.0, 0.0, 0.0, None, 0.0),
             make_point(60.0, 20.0, 15.0, None, 0.3),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         assert!(data.average_power_series.iter().all(|(_, w)| *w == 0.0));
     }
 
@@ -578,6 +586,7 @@ mod tests {
         elapsed_secs: f64,
         moving_secs: f64,
         avg_speed_kmh: f64,
+        training_speed_kmh: f64,
         avg_power_watts: Option<f64>,
         total_elevation_gain_m: Option<f64>,
         moving_speed_quartiles_kmh: Option<Quartiles>,
@@ -587,6 +596,7 @@ mod tests {
             elapsed_secs,
             moving_secs,
             avg_speed_kmh,
+            training_speed_kmh,
             avg_power_watts,
             total_elevation_gain_m,
             moving_speed_quartiles_kmh,
@@ -605,6 +615,7 @@ mod tests {
             3725.0,
             3500.0,
             22.5,
+            24.1,
             Some(180.0),
             Some(320.0),
             Some(Quartiles {
@@ -632,6 +643,7 @@ mod tests {
             1800.0,
             1750.0,
             21.0,
+            23.0,
             Some(150.0),
             None,
             Some(Quartiles {
@@ -645,8 +657,8 @@ mod tests {
         let p1 = pipe_positions(lines[0]);
         let p2 = pipe_positions(lines[1]);
         assert_eq!(&p1[..3], &p2[..]);
-        // No elevation cell: line 1 has exactly 5 pipes (Dist|Elapsed|Moving|AvgSpeed|AvgPower|quit).
-        assert_eq!(p1.len(), 5);
+        // No elevation: Dist|Elapsed|Moving|AvgSpeed|Training|AvgPower|quit = 6 pipes.
+        assert_eq!(p1.len(), 6);
         assert!(!lines[0].contains("Elevation"));
     }
 
@@ -657,6 +669,7 @@ mod tests {
             600.0,
             580.0,
             18.0,
+            20.0,
             None,
             Some(100.0),
             Some(Quartiles {
@@ -675,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_format_status_text_pipes_align_without_quartiles() {
-        let summary = make_summary(2.0, 120.0, 100.0, 9.0, None, None, None);
+        let summary = make_summary(2.0, 120.0, 100.0, 9.0, 11.0, None, None, None);
         let text = format_status_text(&summary);
         let lines: Vec<&str> = text.split('\n').collect();
         let p1 = pipe_positions(lines[0]);
@@ -695,7 +708,7 @@ mod tests {
             make_point(0.0, 0.0, 0.0, None, 0.0),
             make_point(60.0, 20.0, 15.0, Some(200.0), 0.3),
         ];
-        let data = build_plot_data(&points, 0.0);
+        let data = build_plot_data(&points, 0.0, 10.0);
         let expected = 200.0 * 60.0 / (60.0 * 0.9);
         assert!((data.average_power_series[1].1 - expected).abs() < 1e-9);
     }
