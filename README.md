@@ -1,5 +1,8 @@
 # my-watts: GPS Analyzer for Bike Rides
 
+[![CI](https://github.com/PierreSelim/my-watts/actions/workflows/ci.yml/badge.svg)](https://github.com/PierreSelim/my-watts/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/PierreSelim/my-watts/graph/badge.svg)](https://codecov.io/gh/PierreSelim/my-watts)
+
 A Rust tool to analyze GPX files from bike tracking applications: smooth GPS drift, estimate power from physics, and produce per-point and aggregated ride metrics with an interactive terminal plot.
 
 ## Features
