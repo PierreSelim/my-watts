@@ -43,6 +43,10 @@ cargo run --release -- analyze my_ride.gpx --rider-weight 72 --stop-buffer-secs 
 
 All CSV column definitions live in [SPEC.md](SPEC.md).
 
+The TUI looks like
+
+![TUI of My Watts](docs/screenshot/my-watts.png)
+
 ## Configuration
 
 Bike presets and user defaults live in `config.toml` at the platform config dir (`%APPDATA%\my-watts\` on Windows, `~/.config/my-watts/` on Unix). See [SPEC.md](SPEC.md#configuration) for the schema.
