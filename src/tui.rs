@@ -712,6 +712,120 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_altitude_bounds_non_empty_rounds_correctly() {
+        let series = vec![(0.0, 110.0), (1.0, 175.0), (2.0, 200.0)];
+        let bounds = compute_altitude_bounds(&series, 50.0);
+        // min=110 → floor(110/50)*50=100; max=200 → ceil(200/50)*50=200
+        assert_eq!(bounds[0], 100.0);
+        assert_eq!(bounds[1], 200.0);
+    }
+
+    #[test]
+    fn test_compute_altitude_bounds_single_point() {
+        let series = vec![(0.0, 150.0)];
+        let bounds = compute_altitude_bounds(&series, 50.0);
+        assert_eq!(bounds[0], 150.0); // floor(150/50)*50=150
+        assert_eq!(bounds[1], 200.0); // ceil(150/50)*50=150 → hi.max(lo+step)=200
+    }
+
+    #[test]
+    fn test_compute_altitude_bounds_same_min_max_gets_at_least_one_step() {
+        // min==max → hi = lo + step after max
+        let series = vec![(0.0, 200.0), (1.0, 200.0)];
+        let bounds = compute_altitude_bounds(&series, 50.0);
+        assert!(bounds[1] >= bounds[0] + 50.0);
+    }
+
+    #[test]
+    fn test_compute_altitude_bounds_empty_returns_step() {
+        let bounds = compute_altitude_bounds(&[], 50.0);
+        assert_eq!(bounds, [0.0, 50.0]);
+    }
+
+    #[test]
+    fn test_time_axis_labels_format_and_count() {
+        let bounds = [0.0, 3600.0];
+        let labels = time_axis_labels(&bounds);
+        assert_eq!(labels.len(), 3);
+        // Labels are Span::raw so content equals the formatted string
+        let texts: Vec<String> = labels.into_iter().map(|s| s.content.into_owned()).collect();
+        assert_eq!(texts[0], "00:00:00");
+        assert_eq!(texts[1], "00:30:00");
+        assert_eq!(texts[2], "01:00:00");
+    }
+
+    #[test]
+    fn test_draw_does_not_panic_with_full_data() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let points = vec![
+            make_point(0.0, 0.0, 0.0, None, 0.0),
+            make_point(60.0, 20.0, 15.0, Some(200.0), 0.3),
+            make_point(120.0, 25.0, 18.0, Some(250.0), 0.7),
+        ];
+        let data = build_plot_data(&points, 3.0, 10.0);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &data)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_does_not_panic_with_empty_data() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let data = build_plot_data(&[], 3.0, 0.0);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &data)).unwrap();
+    }
+
+    fn make_point_with_alt(
+        seconds: f64,
+        instant_speed: f64,
+        avg_speed: f64,
+        power: Option<f64>,
+        distance: f64,
+        alt: f64,
+    ) -> AnalyzePoint {
+        AnalyzePoint {
+            timestamp: chrono::Utc::now(),
+            seconds_from_start: seconds,
+            moving_seconds_from_start: seconds * 0.9,
+            raw_lat: 0.0,
+            raw_lon: 0.0,
+            smoothed_lat: 0.0,
+            smoothed_lon: 0.0,
+            smoothed_alt: Some(alt),
+            instant_speed_kmh: instant_speed,
+            average_speed_kmh: avg_speed,
+            distance_km: distance,
+            power_smooth_watts: power,
+            cumulative_energy_kj: power.map(|w| w * seconds / 1000.0),
+        }
+    }
+
+    #[test]
+    fn test_draw_with_altitude_data_does_not_panic() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        // Points with altitude → altitude_series is non-empty → covers the else branch
+        // in draw_speed_altitude_panel (the "Altitude: …" title) and the datasets.push path.
+        let points = vec![
+            make_point_with_alt(0.0, 0.0, 0.0, None, 0.0, 50.0),
+            make_point_with_alt(60.0, 20.0, 15.0, Some(200.0), 0.3, 55.0),
+            make_point_with_alt(120.0, 25.0, 18.0, Some(250.0), 0.7, 60.0),
+        ];
+        let data = build_plot_data(&points, 3.0, 10.0);
+        assert!(
+            !data.altitude_series.is_empty(),
+            "altitude_series should be non-empty"
+        );
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &data)).unwrap();
+    }
+
+    #[test]
     fn test_average_power_series_equals_energy_over_moving_time() {
         // 200 W constant for 60 s → cumulative_energy_kj = 200 * 60 / 1000 = 12 kJ
         // moving_seconds = 60 * 0.9 = 54 s (from make_point formula)

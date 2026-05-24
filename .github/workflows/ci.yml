@@ -44,7 +44,7 @@ jobs:
         run: cargo test
 
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
+        run: which cargo-tarpaulin || cargo install cargo-tarpaulin --locked
 
       - name: Generate coverage report
         run: cargo tarpaulin --out Xml

@@ -143,6 +143,46 @@ mod tests {
     }
 
     #[test]
+    fn test_load_gpx_reads_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp = NamedTempFile::new().unwrap();
+        write!(
+            temp,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1">
+    <trk><trkseg>
+        <trkpt lat="40.0" lon="-120.0"><ele>100.0</ele><time>2026-04-27T10:00:00Z</time></trkpt>
+        <trkpt lat="40.1" lon="-120.1"><ele>105.0</ele><time>2026-04-27T10:01:00Z</time></trkpt>
+    </trkseg></trk>
+</gpx>"#
+        )
+        .unwrap();
+        temp.flush().unwrap();
+
+        let track = load_gpx(temp.path()).unwrap();
+        assert_eq!(track.len(), 2);
+        assert_eq!(track.points[0].lat, 40.0);
+    }
+
+    #[test]
+    fn test_load_gpx_nonexistent_file_errors() {
+        assert!(load_gpx("/nonexistent/missing.gpx").is_err());
+    }
+
+    #[test]
+    fn test_parse_gpx_invalid_timestamp_errors() {
+        let content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1">
+    <trk><trkseg>
+        <trkpt lat="40.0" lon="-120.0"><time>not-a-date</time></trkpt>
+    </trkseg></trk>
+</gpx>"#;
+        assert!(parse_gpx(content).is_err());
+    }
+
+    #[test]
     fn test_parse_gpx_deduplicates_consecutive_same_timestamp() {
         let gpx_content = r#"<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1">

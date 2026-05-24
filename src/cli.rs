@@ -166,3 +166,120 @@ impl AnalyzeCommand {
         analysis_output_path(&self.input, "intervals.csv")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_input_stem_strips_extension() {
+        assert_eq!(input_stem(Path::new("ride.gpx")), "ride");
+    }
+
+    #[test]
+    fn test_input_stem_no_extension() {
+        assert_eq!(input_stem(Path::new("ride")), "ride");
+    }
+
+    #[test]
+    fn test_input_stem_multiple_dots_keeps_all_but_last() {
+        assert_eq!(input_stem(Path::new("my.ride.gpx")), "my.ride");
+    }
+
+    #[test]
+    fn test_default_output_path_appends_suffix() {
+        let p = default_output_path(Path::new("ride.gpx"), "smoothed.csv");
+        assert_eq!(p, PathBuf::from("ride.smoothed.csv"));
+    }
+
+    #[test]
+    fn test_smooth_command_output_path_none_uses_default() {
+        let cmd = SmoothCommand {
+            input: PathBuf::from("my_ride.gpx"),
+            output: None,
+            window_size: 5,
+            degree: 2,
+            verbose: false,
+        };
+        assert_eq!(cmd.output_path(), PathBuf::from("my_ride.smoothed.csv"));
+    }
+
+    #[test]
+    fn test_smooth_command_output_path_some_overrides() {
+        let cmd = SmoothCommand {
+            input: PathBuf::from("my_ride.gpx"),
+            output: Some(PathBuf::from("custom.csv")),
+            window_size: 5,
+            degree: 2,
+            verbose: false,
+        };
+        assert_eq!(cmd.output_path(), PathBuf::from("custom.csv"));
+    }
+
+    #[test]
+    fn test_power_command_output_path_none_uses_default() {
+        let cmd = PowerCommand {
+            input: PathBuf::from("ride.gpx"),
+            rider_weight: 75.0,
+            bike_weight: 10.0,
+            bike: "road".to_string(),
+            config: None,
+            output: None,
+            verbose: false,
+        };
+        assert_eq!(cmd.output_path(), PathBuf::from("ride.power.csv"));
+    }
+
+    #[test]
+    fn test_power_command_output_path_some_overrides() {
+        let cmd = PowerCommand {
+            input: PathBuf::from("ride.gpx"),
+            rider_weight: 75.0,
+            bike_weight: 10.0,
+            bike: "road".to_string(),
+            config: None,
+            output: Some(PathBuf::from("out.csv")),
+            verbose: false,
+        };
+        assert_eq!(cmd.output_path(), PathBuf::from("out.csv"));
+    }
+
+    fn make_analyze_cmd(input: &str, output: Option<PathBuf>) -> AnalyzeCommand {
+        AnalyzeCommand {
+            input: PathBuf::from(input),
+            output,
+            window_size: 5,
+            degree: 2,
+            rider_weight: None,
+            bike_weight: 10.0,
+            bike: None,
+            config: None,
+            smooth_window: 5,
+            stop_buffer_secs: 10.0,
+            no_plot: true,
+            verbose: false,
+        }
+    }
+
+    #[test]
+    fn test_analyze_command_analyze_output_path_none_uses_analysis_dir() {
+        let cmd = make_analyze_cmd("ride.gpx", None);
+        let path = cmd.analyze_output_path();
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert_eq!(name, "ride.analyze.csv");
+    }
+
+    #[test]
+    fn test_analyze_command_analyze_output_path_some_overrides() {
+        let cmd = make_analyze_cmd("ride.gpx", Some(PathBuf::from("custom.csv")));
+        assert_eq!(cmd.analyze_output_path(), PathBuf::from("custom.csv"));
+    }
+
+    #[test]
+    fn test_analyze_command_intervals_output_path_always_uses_analysis_dir() {
+        let cmd = make_analyze_cmd("ride.gpx", None);
+        let path = cmd.intervals_output_path();
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert_eq!(name, "ride.intervals.csv");
+    }
+}

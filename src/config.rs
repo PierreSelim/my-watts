@@ -307,4 +307,23 @@ cda = 0.32
         assert_eq!(via_default.default_bike, via_builtin.default_bike);
         assert_eq!(via_default.bikes.len(), via_builtin.bikes.len());
     }
+
+    #[test]
+    fn test_my_watts_home_dir_ends_with_my_watts() {
+        let dir = my_watts_home_dir();
+        assert_eq!(dir.file_name().unwrap(), ".my-watts");
+    }
+
+    #[test]
+    fn test_analysis_dir_ends_with_analysis() {
+        let dir = analysis_dir();
+        assert_eq!(dir.file_name().unwrap(), "analysis");
+    }
+
+    #[test]
+    fn test_analysis_dir_is_inside_my_watts_home() {
+        let home = my_watts_home_dir();
+        let analysis = analysis_dir();
+        assert_eq!(analysis.parent().unwrap(), home);
+    }
 }

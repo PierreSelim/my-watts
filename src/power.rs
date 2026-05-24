@@ -217,4 +217,69 @@ mod tests {
         };
         assert!(compute_power(&track, &config).is_err());
     }
+
+    #[test]
+    fn test_no_altitude_gradient_defaults_to_zero() {
+        // When alt is None on either point, alt_diff falls to the wildcard arm → 0.0
+        let track = Track::new(vec![
+            GpsPoint {
+                lat: 48.0,
+                lon: 2.0,
+                alt: None,
+                timestamp: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+            },
+            GpsPoint {
+                lat: 48.001,
+                lon: 2.0,
+                alt: None,
+                timestamp: DateTime::from_timestamp(1_700_000_010, 0).unwrap(),
+            },
+        ])
+        .unwrap();
+        let config = PowerConfig {
+            rider_weight_kg: 70.0,
+            bike_weight_kg: 8.0,
+            bike: road_bike(),
+        };
+        let points = compute_power(&track, &config).unwrap();
+        assert_eq!(points[0].gradient, 0.0);
+        // Power should still be positive (rolling + drag) even without altitude
+        assert!(points[0].power_watts > 0.0);
+    }
+
+    #[test]
+    fn test_non_positive_time_delta_errors() {
+        // p1 has a later timestamp than p2 → negative dt → NonPositiveTimeDelta
+        let p1 = make_point(48.0, 2.0, 100.0, 10);
+        let p2 = make_point(48.001, 2.0, 100.0, 0);
+        let track = Track::new(vec![p1, p2]).unwrap();
+        let config = PowerConfig {
+            rider_weight_kg: 70.0,
+            bike_weight_kg: 8.0,
+            bike: road_bike(),
+        };
+        let err = compute_power(&track, &config).unwrap_err();
+        assert!(
+            matches!(err, crate::GpsAnalyzerError::NonPositiveTimeDelta(_)),
+            "expected NonPositiveTimeDelta, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_zero_distance_segment_has_zero_power() {
+        // Same lat/lon → distance = 0 → gradient = 0, speed = 0 → f_drag = 0 → power = 0
+        let track = Track::new(vec![
+            make_point(48.0, 2.0, 100.0, 0),
+            make_point(48.0, 2.0, 100.0, 10),
+        ])
+        .unwrap();
+        let config = PowerConfig {
+            rider_weight_kg: 70.0,
+            bike_weight_kg: 8.0,
+            bike: road_bike(),
+        };
+        let points = compute_power(&track, &config).unwrap();
+        assert_eq!(points[0].power_watts, 0.0);
+        assert_eq!(points[0].speed_ms, 0.0);
+    }
 }

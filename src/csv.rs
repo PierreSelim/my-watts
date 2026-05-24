@@ -229,6 +229,63 @@ mod tests {
     }
 
     #[test]
+    fn test_write_power_csv_row_and_column_count() {
+        use crate::power::PowerPoint;
+        use chrono::DateTime;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let points = vec![
+            PowerPoint {
+                timestamp: DateTime::from_timestamp(1_700_000_010, 0).unwrap(),
+                power_watts: 250.345,
+                speed_ms: 8.333,
+                gradient: 0.025,
+            },
+            PowerPoint {
+                timestamp: DateTime::from_timestamp(1_700_000_020, 0).unwrap(),
+                power_watts: 0.0,
+                speed_ms: 0.0,
+                gradient: -0.1,
+            },
+        ];
+        write_power_csv(&points, temp_file.path()).unwrap();
+
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3, "header + 2 data rows");
+        assert_eq!(lines[0].split(',').count(), 4, "4 columns");
+        // round_to(250.345, 1) == 250.3
+        assert!(
+            lines[1].contains("250.3"),
+            "power rounded to 1dp: {}",
+            lines[1]
+        );
+        // round_to(8.333 * 3.6, 1) == round_to(29.999, 1) == 30.0
+        assert!(lines[1].contains("30.0"), "speed in km/h: {}", lines[1]);
+        // round_to(0.025 * 100, 1) == 2.5
+        assert!(lines[1].contains("2.5"), "gradient in pct: {}", lines[1]);
+    }
+
+    #[test]
+    fn test_write_power_csv_negative_gradient_is_preserved() {
+        use crate::power::PowerPoint;
+        use chrono::DateTime;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let points = vec![PowerPoint {
+            timestamp: DateTime::from_timestamp(1_700_000_010, 0).unwrap(),
+            power_watts: 0.0,
+            speed_ms: 5.0,
+            gradient: -0.05,
+        }];
+        write_power_csv(&points, temp_file.path()).unwrap();
+
+        let content = fs::read_to_string(temp_file.path()).unwrap();
+        // round_to(-0.05 * 100, 1) == -5.0
+        assert!(content.contains("-5.0"), "negative gradient: {content}");
+    }
+
+    #[test]
     fn test_write_analyze_csv_row_and_column_count() {
         let temp_file = NamedTempFile::new().unwrap();
         let points = vec![
