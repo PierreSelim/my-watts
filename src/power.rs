@@ -26,9 +26,7 @@ pub fn compute_power(
     config: &PowerConfig,
 ) -> Result<Vec<PowerPoint>, GpsAnalyzerError> {
     if track.len() < 2 {
-        return Err(GpsAnalyzerError::ParseError(
-            "Track must have at least 2 points to compute power".to_string(),
-        ));
+        return Err(GpsAnalyzerError::TrackTooShort(2));
     }
 
     let total_mass = config.rider_weight_kg + config.bike_weight_kg;
@@ -47,9 +45,7 @@ fn segment_power(
 ) -> Result<PowerPoint, GpsAnalyzerError> {
     let dt = (p2.timestamp - p1.timestamp).num_milliseconds() as f64 / 1000.0;
     if dt <= 0.0 {
-        return Err(GpsAnalyzerError::ParseError(format!(
-            "Non-positive time delta ({dt:.3}s) between consecutive GPS points"
-        )));
+        return Err(GpsAnalyzerError::NonPositiveTimeDelta(dt));
     }
 
     let distance = haversine_distance(p1, p2);

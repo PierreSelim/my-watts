@@ -16,6 +16,7 @@ use ratatui::{
 use std::io::Stdout;
 
 use crate::{
+    analyze,
     stats::{self, Quartiles},
     AnalyzePoint, GpsAnalyzerError,
 };
@@ -28,6 +29,7 @@ pub struct RideSummary {
     pub avg_speed_kmh: f64,
     pub training_speed_kmh: f64,
     pub avg_power_watts: Option<f64>,
+    pub total_calories_kcal: Option<f64>,
     pub total_elevation_gain_m: Option<f64>,
     pub moving_speed_quartiles_kmh: Option<Quartiles>,
 }
@@ -64,6 +66,44 @@ pub fn compute_altitude_bounds(series: &[(f64, f64)], step: f64) -> [f64; 2] {
     let lo = (min_y / step).floor() * step;
     let hi = (max_y / step).ceil() * step;
     [lo, hi.max(lo + step)]
+}
+
+fn summarize_ride(
+    points: &[AnalyzePoint],
+    moving_speed_threshold_kmh: f64,
+    training_speed_kmh: f64,
+) -> RideSummary {
+    let total_distance_km = points.last().map(|p| p.distance_km).unwrap_or(0.0);
+    let elapsed_secs = points.last().map(|p| p.seconds_from_start).unwrap_or(0.0);
+    let moving_secs = points
+        .last()
+        .map(|p| p.moving_seconds_from_start)
+        .unwrap_or(0.0);
+    let avg_speed_kmh = points.last().map(|p| p.average_speed_kmh).unwrap_or(0.0);
+    let avg_power_watts = points.last().and_then(|last| {
+        let kj = last.cumulative_energy_kj?;
+        if last.moving_seconds_from_start > 0.0 {
+            Some(kj * 1000.0 / last.moving_seconds_from_start)
+        } else {
+            None
+        }
+    });
+    let total_calories_kcal = points
+        .last()
+        .and_then(|p| p.cumulative_energy_kj.map(crate::kj_to_kcal));
+    let total_elevation_gain_m = analyze::compute_elevation_gain_m(points);
+    let moving_speed_quartiles_kmh = moving_speed_quartiles(points, moving_speed_threshold_kmh);
+    RideSummary {
+        total_distance_km,
+        elapsed_secs,
+        moving_secs,
+        avg_speed_kmh,
+        training_speed_kmh,
+        avg_power_watts,
+        total_calories_kcal,
+        total_elevation_gain_m,
+        moving_speed_quartiles_kmh,
+    }
 }
 
 pub fn build_plot_data(
@@ -110,35 +150,6 @@ pub fn build_plot_data(
     let speed_bounds = compute_y_bounds(&instant_speed_series, 5.0);
     let altitude_bounds = compute_altitude_bounds(&altitude_series, 50.0);
 
-    let total_distance_km = points.last().map(|p| p.distance_km).unwrap_or(0.0);
-    let elapsed_secs = max_time;
-    let moving_secs = points
-        .last()
-        .map(|p| p.moving_seconds_from_start)
-        .unwrap_or(0.0);
-    let avg_speed_kmh = points.last().map(|p| p.average_speed_kmh).unwrap_or(0.0);
-
-    let avg_power_watts = points.last().and_then(|last| {
-        let kj = last.cumulative_energy_kj?;
-        if last.moving_seconds_from_start > 0.0 {
-            Some(kj * 1000.0 / last.moving_seconds_from_start)
-        } else {
-            None
-        }
-    });
-
-    let total_elevation_gain_m = if altitude_series.is_empty() {
-        None
-    } else {
-        let gain = altitude_series
-            .windows(2)
-            .map(|w| (w[1].1 - w[0].1).max(0.0))
-            .sum::<f64>();
-        Some(gain)
-    };
-
-    let moving_speed_quartiles_kmh = moving_speed_quartiles(points, moving_speed_threshold_kmh);
-
     PlotData {
         power_series,
         average_power_series,
@@ -149,16 +160,7 @@ pub fn build_plot_data(
         power_bounds,
         speed_bounds,
         altitude_bounds,
-        summary: RideSummary {
-            total_distance_km,
-            elapsed_secs,
-            moving_secs,
-            avg_speed_kmh,
-            training_speed_kmh,
-            avg_power_watts,
-            total_elevation_gain_m,
-            moving_speed_quartiles_kmh,
-        },
+        summary: summarize_ride(points, moving_speed_threshold_kmh, training_speed_kmh),
     }
 }
 
@@ -341,9 +343,13 @@ pub fn format_status_text(s: &RideSummary) -> String {
         .avg_power_watts
         .map(|w| format!("{:.0} W", w))
         .unwrap_or_else(|| "N/A".to_string());
+    let calories_str = s
+        .total_calories_kcal
+        .map(|kcal| format!("  |  Calories: {:.0} kcal", kcal))
+        .unwrap_or_default();
     let elevation_str = s
         .total_elevation_gain_m
-        .map(|m| format!("  |  Elevation: {:.0} m", m))
+        .map(|m| format!("  |  Elev: {:.0} m", m))
         .unwrap_or_default();
 
     let (p25_str, p50_str, p75_str) = match s.moving_speed_quartiles_kmh {
@@ -358,10 +364,10 @@ pub fn format_status_text(s: &RideSummary) -> String {
     let dist_cell = format!("Dist: {:.2} km", s.total_distance_km);
     let elapsed_cell = format!("Elapsed: {}", crate::fmt_hhmmss(s.elapsed_secs));
     let moving_cell = format!("Moving: {}", crate::fmt_hhmmss(s.moving_secs));
-    let avg_speed_cell = format!("Avg speed: {:.1} km/h", s.avg_speed_kmh);
-    let training_speed_cell = format!("Training speed: {:.1} km/h", s.training_speed_kmh);
+    let avg_speed_cell = format!("Mov avg: {:.1} km/h", s.avg_speed_kmh);
+    let training_speed_cell = format!("Train spd: {:.1} km/h", s.training_speed_kmh);
 
-    let speed_label_cell = "Speed (moving)";
+    let speed_label_cell = "Speed (mov)";
     let p25_cell = format!("P25: {}", p25_str);
     let median_cell = format!("Median: {}", p50_str);
     let p75_cell = format!("P75: {}", p75_str);
@@ -372,13 +378,14 @@ pub fn format_status_text(s: &RideSummary) -> String {
     let w4 = avg_speed_cell.len().max(p75_cell.len());
 
     format!(
-        " {dist:<w1$}  |  {elapsed:<w2$}  |  {moving:<w3$}  |  {avg_speed:<w4$}  |  {training_speed}  |  Avg power: {power}{elevation}  |  [q] quit\n {speed_label:<w1$}  |  {p25:<w2$}  |  {median:<w3$}  |  {p75:<w4$}",
+        " {dist:<w1$}  |  {elapsed:<w2$}  |  {moving:<w3$}  |  {avg_speed:<w4$}  |  {training_speed}  |  Avg pwr: {power}{calories}{elevation}  |  [q] quit\n {speed_label:<w1$}  |  {p25:<w2$}  |  {median:<w3$}  |  {p75:<w4$}",
         dist = dist_cell,
         elapsed = elapsed_cell,
         moving = moving_cell,
         avg_speed = avg_speed_cell,
         training_speed = training_speed_cell,
         power = power_str,
+        calories = calories_str,
         elevation = elevation_str,
         speed_label = speed_label_cell,
         p25 = p25_cell,
@@ -588,6 +595,7 @@ mod tests {
         avg_speed_kmh: f64,
         training_speed_kmh: f64,
         avg_power_watts: Option<f64>,
+        total_calories_kcal: Option<f64>,
         total_elevation_gain_m: Option<f64>,
         moving_speed_quartiles_kmh: Option<Quartiles>,
     ) -> RideSummary {
@@ -598,6 +606,7 @@ mod tests {
             avg_speed_kmh,
             training_speed_kmh,
             avg_power_watts,
+            total_calories_kcal,
             total_elevation_gain_m,
             moving_speed_quartiles_kmh,
         }
@@ -617,6 +626,7 @@ mod tests {
             22.5,
             24.1,
             Some(180.0),
+            Some(720.0),
             Some(320.0),
             Some(Quartiles {
                 p25: 18.2,
@@ -646,6 +656,7 @@ mod tests {
             23.0,
             Some(150.0),
             None,
+            None,
             Some(Quartiles {
                 p25: 15.0,
                 p50: 20.0,
@@ -657,9 +668,9 @@ mod tests {
         let p1 = pipe_positions(lines[0]);
         let p2 = pipe_positions(lines[1]);
         assert_eq!(&p1[..3], &p2[..]);
-        // No elevation: Dist|Elapsed|Moving|AvgSpeed|Training|AvgPower|quit = 6 pipes.
+        // No elevation, no calories: Dist|Elapsed|Moving|AvgSpeed|Training|AvgPower|quit = 6 pipes.
         assert_eq!(p1.len(), 6);
-        assert!(!lines[0].contains("Elevation"));
+        assert!(!lines[0].contains("Elev"));
     }
 
     #[test]
@@ -670,6 +681,7 @@ mod tests {
             580.0,
             18.0,
             20.0,
+            None,
             None,
             Some(100.0),
             Some(Quartiles {
@@ -683,12 +695,12 @@ mod tests {
         let p1 = pipe_positions(lines[0]);
         let p2 = pipe_positions(lines[1]);
         assert_eq!(&p1[..3], &p2[..]);
-        assert!(lines[0].contains("Avg power: N/A"));
+        assert!(lines[0].contains("Avg pwr: N/A"));
     }
 
     #[test]
     fn test_format_status_text_pipes_align_without_quartiles() {
-        let summary = make_summary(2.0, 120.0, 100.0, 9.0, 11.0, None, None, None);
+        let summary = make_summary(2.0, 120.0, 100.0, 9.0, 11.0, None, None, None, None);
         let text = format_status_text(&summary);
         let lines: Vec<&str> = text.split('\n').collect();
         let p1 = pipe_positions(lines[0]);

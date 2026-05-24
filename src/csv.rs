@@ -5,6 +5,11 @@ use serde::Serialize;
 use std::fs::File;
 use std::path::Path;
 
+fn round_to(value: f64, places: u32) -> f64 {
+    let factor = 10_f64.powi(places as i32);
+    (value * factor).round() / factor
+}
+
 fn flush_writer(writer: &mut Writer<File>) -> Result<(), GpsAnalyzerError> {
     writer
         .flush()
@@ -61,9 +66,9 @@ pub fn write_power_csv<P: AsRef<Path>>(
     for point in points {
         let record = PowerCsvRecord {
             timestamp: point.timestamp.to_rfc3339(),
-            power_watts: (point.power_watts * 10.0).round() / 10.0,
-            speed_kmh: (point.speed_ms * 3.6 * 10.0).round() / 10.0,
-            gradient_pct: (point.gradient * 100.0 * 10.0).round() / 10.0,
+            power_watts: round_to(point.power_watts, 1),
+            speed_kmh: round_to(point.speed_ms * 3.6, 1),
+            gradient_pct: round_to(point.gradient * 100.0, 1),
         };
         writer
             .serialize(record)
@@ -100,14 +105,14 @@ pub fn write_analyze_csv<P: AsRef<Path>>(
     for point in points {
         let record = AnalyzeCsvRecord {
             timestamp: point.timestamp.to_rfc3339(),
-            seconds_from_start: (point.seconds_from_start * 100.0).round() / 100.0,
+            seconds_from_start: round_to(point.seconds_from_start, 2),
             raw_lat: point.raw_lat,
             raw_lon: point.raw_lon,
             smoothed_lat: point.smoothed_lat,
             smoothed_lon: point.smoothed_lon,
-            instant_speed_kmh: (point.instant_speed_kmh * 10.0).round() / 10.0,
-            average_speed_kmh: (point.average_speed_kmh * 10.0).round() / 10.0,
-            distance_km: (point.distance_km * 1000.0).round() / 1000.0,
+            instant_speed_kmh: round_to(point.instant_speed_kmh, 1),
+            average_speed_kmh: round_to(point.average_speed_kmh, 1),
+            distance_km: round_to(point.distance_km, 3),
             power_smooth_watts: point
                 .power_smooth_watts
                 .map(|w| format!("{:.1}", w))
@@ -148,13 +153,13 @@ pub fn write_intervals_csv<P: AsRef<Path>>(
 
     for interval in intervals {
         let record = IntervalCsvRecord {
-            interval_type: interval.interval_type.clone(),
+            interval_type: interval.interval_type.to_string(),
             interval_index: interval.interval_index,
             start_timestamp: interval.start_timestamp.to_rfc3339(),
             end_timestamp: interval.end_timestamp.to_rfc3339(),
-            duration_seconds: (interval.duration_seconds * 10.0).round() / 10.0,
-            distance_km: (interval.distance_km * 1000.0).round() / 1000.0,
-            average_speed_kmh: (interval.average_speed_kmh * 10.0).round() / 10.0,
+            duration_seconds: round_to(interval.duration_seconds, 1),
+            distance_km: round_to(interval.distance_km, 3),
+            average_speed_kmh: round_to(interval.average_speed_kmh, 1),
             average_power_watts: interval
                 .average_power_watts
                 .map(|w| format!("{:.1}", w))
@@ -299,7 +304,7 @@ mod tests {
     fn test_write_intervals_csv_column_count() {
         let temp_file = NamedTempFile::new().unwrap();
         let intervals = vec![IntervalSummary {
-            interval_type: "1min".to_string(),
+            interval_type: crate::IntervalType::Min1,
             interval_index: 0,
             start_timestamp: Utc::now(),
             end_timestamp: Utc::now(),
@@ -319,7 +324,7 @@ mod tests {
     fn test_write_intervals_csv_power_some() {
         let temp_file = NamedTempFile::new().unwrap();
         let intervals = vec![IntervalSummary {
-            interval_type: "5km".to_string(),
+            interval_type: crate::IntervalType::Km5,
             interval_index: 2,
             start_timestamp: Utc::now(),
             end_timestamp: Utc::now(),
@@ -343,7 +348,7 @@ mod tests {
     fn test_write_intervals_csv_power_none_is_empty_field() {
         let temp_file = NamedTempFile::new().unwrap();
         let intervals = vec![IntervalSummary {
-            interval_type: "1km".to_string(),
+            interval_type: crate::IntervalType::Km1,
             interval_index: 0,
             start_timestamp: Utc::now(),
             end_timestamp: Utc::now(),
@@ -366,13 +371,22 @@ mod tests {
 
     #[test]
     fn test_write_intervals_csv_all_seven_types() {
+        use crate::IntervalType;
         let temp_file = NamedTempFile::new().unwrap();
-        let types = ["1min", "5min", "10min", "30min", "1km", "5km", "10km"];
-        let intervals: Vec<IntervalSummary> = types
+        let all_types = [
+            IntervalType::Min1,
+            IntervalType::Min5,
+            IntervalType::Min10,
+            IntervalType::Min30,
+            IntervalType::Km1,
+            IntervalType::Km5,
+            IntervalType::Km10,
+        ];
+        let intervals: Vec<IntervalSummary> = all_types
             .iter()
             .enumerate()
             .map(|(i, t)| IntervalSummary {
-                interval_type: t.to_string(),
+                interval_type: *t,
                 interval_index: i,
                 start_timestamp: Utc::now(),
                 end_timestamp: Utc::now(),
@@ -384,8 +398,9 @@ mod tests {
             .collect();
         write_intervals_csv(&intervals, temp_file.path()).unwrap();
         let content = fs::read_to_string(temp_file.path()).unwrap();
-        for t in &types {
-            assert!(content.contains(t), "missing interval type {t}");
+        for t in &all_types {
+            let label = t.to_string();
+            assert!(content.contains(&label), "missing interval type {label}");
         }
     }
 }

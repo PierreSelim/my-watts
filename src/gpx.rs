@@ -6,33 +6,33 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Deserialize)]
-pub struct Gpx {
+struct Gpx {
     #[serde(default)]
-    pub trk: Vec<GpxTrack>,
+    trk: Vec<GpxTrack>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GpxTrack {
+struct GpxTrack {
     #[serde(default)]
-    pub trkseg: Vec<GpxTrackSegment>,
+    trkseg: Vec<GpxTrackSegment>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GpxTrackSegment {
+struct GpxTrackSegment {
     #[serde(default)]
-    pub trkpt: Vec<GpxTrackPoint>,
+    trkpt: Vec<GpxTrackPoint>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct GpxTrackPoint {
+struct GpxTrackPoint {
     #[serde(rename = "@lat")]
-    pub lat: f64,
+    lat: f64,
     #[serde(rename = "@lon")]
-    pub lon: f64,
+    lon: f64,
     #[serde(default, rename = "ele")]
-    pub ele: Option<f64>,
+    ele: Option<f64>,
     #[serde(default, rename = "time")]
-    pub time: Option<String>,
+    time: Option<String>,
 }
 
 pub fn load_gpx<P: AsRef<Path>>(path: P) -> Result<Track, GpsAnalyzerError> {
@@ -44,32 +44,26 @@ pub fn load_gpx<P: AsRef<Path>>(path: P) -> Result<Track, GpsAnalyzerError> {
 pub fn parse_gpx(content: &str) -> Result<Track, GpsAnalyzerError> {
     let gpx: Gpx = from_str(content).map_err(|e| GpsAnalyzerError::InvalidGpx(e.to_string()))?;
 
-    let mut points = Vec::new();
-
-    for track in gpx.trk {
-        for segment in track.trkseg {
-            for trkpt in segment.trkpt {
-                let timestamp = if let Some(time_str) = &trkpt.time {
-                    DateTime::parse_from_rfc3339(time_str)
-                        .map_err(|e| {
-                            GpsAnalyzerError::ParseError(format!("Invalid timestamp: {}", e))
-                        })?
-                        .with_timezone(&chrono::Utc)
-                } else {
-                    return Err(GpsAnalyzerError::ParseError(
-                        "track point is missing a timestamp".to_string(),
-                    ));
-                };
-
-                points.push(GpsPoint {
-                    lat: trkpt.lat,
-                    lon: trkpt.lon,
-                    alt: trkpt.ele,
-                    timestamp,
-                });
-            }
-        }
-    }
+    let mut points = gpx
+        .trk
+        .into_iter()
+        .flat_map(|t| t.trkseg)
+        .flat_map(|s| s.trkpt)
+        .map(|trkpt| {
+            let time_str = trkpt.time.ok_or_else(|| {
+                GpsAnalyzerError::ParseError("track point is missing a timestamp".to_string())
+            })?;
+            let timestamp = DateTime::parse_from_rfc3339(&time_str)
+                .map_err(|e| GpsAnalyzerError::ParseError(format!("Invalid timestamp: {e}")))?
+                .with_timezone(&chrono::Utc);
+            Ok(GpsPoint {
+                lat: trkpt.lat,
+                lon: trkpt.lon,
+                alt: trkpt.ele,
+                timestamp,
+            })
+        })
+        .collect::<Result<Vec<_>, GpsAnalyzerError>>()?;
 
     points.sort_by_key(|p| p.timestamp);
     // Keep the first occurrence of each timestamp (stable after sort = file order).

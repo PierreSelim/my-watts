@@ -1,5 +1,5 @@
 use crate::power::PowerPoint;
-use crate::{haversine_distance, AnalyzePoint, IntervalSummary, Track};
+use crate::{haversine_distance, AnalyzePoint, IntervalSummary, IntervalType, Track};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
@@ -9,46 +9,46 @@ enum IntervalKind {
 }
 
 struct IntervalSpec {
-    label: &'static str,
+    interval_type: IntervalType,
     kind: IntervalKind,
 }
 
 fn interval_specs() -> Vec<IntervalSpec> {
     vec![
         IntervalSpec {
-            label: "1min",
+            interval_type: IntervalType::Min1,
             kind: IntervalKind::Time { window_ms: 60_000 },
         },
         IntervalSpec {
-            label: "5min",
+            interval_type: IntervalType::Min5,
             kind: IntervalKind::Time { window_ms: 300_000 },
         },
         IntervalSpec {
-            label: "10min",
+            interval_type: IntervalType::Min10,
             kind: IntervalKind::Time { window_ms: 600_000 },
         },
         IntervalSpec {
-            label: "30min",
+            interval_type: IntervalType::Min30,
             kind: IntervalKind::Time {
                 window_ms: 1_800_000,
             },
         },
         IntervalSpec {
-            label: "1km",
+            interval_type: IntervalType::Km1,
             kind: IntervalKind::Distance { window_m: 1_000 },
         },
         IntervalSpec {
-            label: "5km",
+            interval_type: IntervalType::Km5,
             kind: IntervalKind::Distance { window_m: 5_000 },
         },
         IntervalSpec {
-            label: "10km",
+            interval_type: IntervalType::Km10,
             kind: IntervalKind::Distance { window_m: 10_000 },
         },
     ]
 }
 
-fn advance_power_window(
+fn power_window_average(
     pp: &[PowerPoint],
     smooth_ts: DateTime<Utc>,
     half_window_ms: i64,
@@ -99,9 +99,6 @@ fn compute_analyze_points(
     moving_speed_threshold_kmh: f64,
     smooth_window_half: usize,
 ) -> Vec<AnalyzePoint> {
-    if smoothed.is_empty() {
-        return vec![];
-    }
     let first_ts = smoothed.points[0].timestamp;
     let mut cumulative_distance_km = 0.0;
     let mut moving_seconds = 0.0;
@@ -156,9 +153,8 @@ fn compute_analyze_points(
             moving_seconds += dt;
         }
 
-        // Consume power points up to this timestamp and accumulate energy (W × s / 1000 = kJ).
-        // power_points[j].timestamp == smoothed.points[j+1].timestamp, so the first power point
-        // is reached when i == 1, with seg_dt = time between point 0 and point 1.
+        // power_points[j].timestamp == smoothed.points[j+1].timestamp; the first power
+        // point is consumed at i == 1, seg_dt covering [point 0, point 1].
         if let Some(pp) = power_points {
             while power_idx < pp.len() && pp[power_idx].timestamp <= smooth_pt.timestamp {
                 let seg_dt = if power_idx == 0 {
@@ -181,7 +177,7 @@ fn compute_analyze_points(
 
         let power_smooth_watts: Option<f64> = power_points.and_then(|pp| {
             let half_window_ms = smooth_window_half as i64 * 1_000;
-            advance_power_window(
+            power_window_average(
                 pp,
                 smooth_pt.timestamp,
                 half_window_ms,
@@ -237,8 +233,10 @@ fn compute_intervals(
         }
 
         for (bucket_idx, bucket_points) in &buckets {
-            let first = bucket_points[0];
-            let last = *bucket_points.last().unwrap();
+            let (Some(first), Some(last)) = (bucket_points.first(), bucket_points.last()) else {
+                continue;
+            };
+            let (first, last) = (*first, *last);
             let duration_seconds = last.seconds_from_start - first.seconds_from_start;
             let distance_km = last.distance_km - first.distance_km;
             let average_speed_kmh = if duration_seconds > 0.0 {
@@ -265,7 +263,7 @@ fn compute_intervals(
             });
 
             summaries.push(IntervalSummary {
-                interval_type: spec.label.to_string(),
+                interval_type: spec.interval_type,
                 interval_index: *bucket_idx,
                 start_timestamp: first.timestamp,
                 end_timestamp: last.timestamp,
@@ -280,18 +278,12 @@ fn compute_intervals(
     summaries
 }
 
-pub fn compute_training_speed_kmh(
-    analyze_points: &[AnalyzePoint],
-    moving_speed_threshold_kmh: f64,
-    stop_buffer_secs: f64,
-) -> f64 {
-    // Pass 1: collect contiguous stop intervals as (start_secs, end_secs).
-    // Both bounds are timestamps of stopped points so the interval is tight.
+fn collect_stop_intervals(points: &[AnalyzePoint], threshold_kmh: f64) -> Vec<(f64, f64)> {
     let mut intervals: Vec<(f64, f64)> = Vec::new();
     let mut stop_start: Option<f64> = None;
     let mut last_stop_time = 0.0_f64;
-    for pt in analyze_points {
-        if pt.instant_speed_kmh < moving_speed_threshold_kmh {
+    for pt in points {
+        if pt.instant_speed_kmh < threshold_kmh {
             if stop_start.is_none() {
                 stop_start = Some(pt.seconds_from_start);
             }
@@ -303,34 +295,48 @@ pub fn compute_training_speed_kmh(
     if let Some(s) = stop_start {
         intervals.push((s, last_stop_time));
     }
+    intervals
+}
 
-    // Expand each stop interval by the buffer on both sides, then sort for binary search.
+fn buffer_intervals(intervals: &[(f64, f64)], buffer_secs: f64) -> Vec<(f64, f64)> {
     let mut buffered: Vec<(f64, f64)> = intervals
         .iter()
-        .map(|(s, e)| (s - stop_buffer_secs, e + stop_buffer_secs))
+        .map(|(s, e)| (s - buffer_secs, e + buffer_secs))
         .collect();
     buffered.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+    buffered
+}
 
-    let in_buffer = |t: f64| -> bool {
-        let idx = buffered.partition_point(|(s, _)| *s <= t);
-        idx > 0 && buffered[idx - 1].1 >= t
-    };
+fn in_buffered_zone(buffered: &[(f64, f64)], t: f64) -> bool {
+    let idx = buffered.partition_point(|(s, _)| *s <= t);
+    idx > 0 && buffered[idx - 1].1 >= t
+}
 
-    // Pass 2: accumulate distance and time for segments outside all buffered zones.
-    let (dist_km, time_secs) = analyze_points
-        .windows(2)
-        .fold((0.0_f64, 0.0_f64), |(acc_dist, acc_time), w| {
-            let prev = &w[0];
-            let curr = &w[1];
-            if !in_buffer(prev.seconds_from_start) && !in_buffer(curr.seconds_from_start) {
-                (
-                    acc_dist + curr.distance_km - prev.distance_km,
-                    acc_time + curr.seconds_from_start - prev.seconds_from_start,
-                )
-            } else {
-                (acc_dist, acc_time)
-            }
-        });
+pub fn compute_training_speed_kmh(
+    analyze_points: &[AnalyzePoint],
+    moving_speed_threshold_kmh: f64,
+    stop_buffer_secs: f64,
+) -> f64 {
+    let stop_intervals = collect_stop_intervals(analyze_points, moving_speed_threshold_kmh);
+    let buffered = buffer_intervals(&stop_intervals, stop_buffer_secs);
+
+    let (dist_km, time_secs) =
+        analyze_points
+            .windows(2)
+            .fold((0.0_f64, 0.0_f64), |(acc_dist, acc_time), w| {
+                let prev = &w[0];
+                let curr = &w[1];
+                if !in_buffered_zone(&buffered, prev.seconds_from_start)
+                    && !in_buffered_zone(&buffered, curr.seconds_from_start)
+                {
+                    (
+                        acc_dist + curr.distance_km - prev.distance_km,
+                        acc_time + curr.seconds_from_start - prev.seconds_from_start,
+                    )
+                } else {
+                    (acc_dist, acc_time)
+                }
+            });
 
     if time_secs > 0.0 {
         dist_km / (time_secs / 3600.0)
@@ -339,10 +345,21 @@ pub fn compute_training_speed_kmh(
     }
 }
 
+pub fn compute_elevation_gain_m(points: &[AnalyzePoint]) -> Option<f64> {
+    points
+        .windows(2)
+        .filter_map(|w| {
+            let curr = w[1].smoothed_alt?;
+            let prev = w[0].smoothed_alt?;
+            Some((curr - prev).max(0.0))
+        })
+        .reduce(|a, b| a + b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GpsPoint, Track};
+    use crate::{GpsPoint, IntervalType, Track};
     use chrono::DateTime;
 
     fn make_gps_point(lat: f64, lon: f64, secs_offset: i64) -> GpsPoint {
@@ -616,7 +633,6 @@ mod tests {
         let track = Track::new(track_pts).unwrap();
 
         // Build matching power points aligned to the smoothed track timestamps
-        let first_ts = track.points[0].timestamp;
         let aligned_power: Vec<PowerPoint> = (0..(n - 1))
             .map(|i| PowerPoint {
                 timestamp: track.points[i + 1].timestamp,
@@ -627,7 +643,6 @@ mod tests {
             .collect();
 
         let (points, _) = analyze_track(&track, &track, Some(&aligned_power), 3.0, 1);
-        let _ = first_ts;
         let total_energy = points.last().unwrap().cumulative_energy_kj.unwrap();
         assert!(
             (total_energy - expected_total_kj).abs() < 1e-9,
@@ -746,7 +761,7 @@ mod tests {
         let intervals = compute_intervals(&points, None, 3.0);
         let count = intervals
             .iter()
-            .filter(|s| s.interval_type == "1min")
+            .filter(|s| s.interval_type == IntervalType::Min1)
             .count();
         assert_eq!(count, 3);
     }
@@ -761,28 +776,28 @@ mod tests {
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "1min")
+                .filter(|s| s.interval_type == IntervalType::Min1)
                 .count(),
             30
         );
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "5min")
+                .filter(|s| s.interval_type == IntervalType::Min5)
                 .count(),
             6
         );
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "10min")
+                .filter(|s| s.interval_type == IntervalType::Min10)
                 .count(),
             3
         );
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "30min")
+                .filter(|s| s.interval_type == IntervalType::Min30)
                 .count(),
             1
         );
@@ -797,7 +812,7 @@ mod tests {
         let intervals = compute_intervals(&points, None, 3.0);
         let count = intervals
             .iter()
-            .filter(|s| s.interval_type == "1km")
+            .filter(|s| s.interval_type == IntervalType::Km1)
             .count();
         assert_eq!(count, 5);
     }
@@ -812,21 +827,21 @@ mod tests {
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "1km")
+                .filter(|s| s.interval_type == IntervalType::Km1)
                 .count(),
             13
         );
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "5km")
+                .filter(|s| s.interval_type == IntervalType::Km5)
                 .count(),
             3
         );
         assert_eq!(
             intervals
                 .iter()
-                .filter(|s| s.interval_type == "10km")
+                .filter(|s| s.interval_type == IntervalType::Km10)
                 .count(),
             2
         );
@@ -841,7 +856,7 @@ mod tests {
         let intervals = compute_intervals(&points, None, 3.0);
         let total_dur: f64 = intervals
             .iter()
-            .filter(|s| s.interval_type == "1min")
+            .filter(|s| s.interval_type == IntervalType::Min1)
             .map(|s| s.duration_seconds)
             .sum();
         assert!(
@@ -859,7 +874,7 @@ mod tests {
         let intervals = compute_intervals(&points, None, 3.0);
         let total_dist: f64 = intervals
             .iter()
-            .filter(|s| s.interval_type == "1min")
+            .filter(|s| s.interval_type == IntervalType::Min1)
             .map(|s| s.distance_km)
             .sum();
         assert!(
@@ -913,7 +928,7 @@ mod tests {
         let intervals = compute_intervals(&points, Some(&power_pts), 3.0);
         let one_min: Vec<_> = intervals
             .iter()
-            .filter(|s| s.interval_type == "1min")
+            .filter(|s| s.interval_type == IntervalType::Min1)
             .collect();
         assert_eq!(one_min.len(), 1);
         let avg = one_min[0].average_power_watts.unwrap();
@@ -929,7 +944,7 @@ mod tests {
         let intervals = compute_intervals(&points, None, 3.0);
         let mut one_min: Vec<_> = intervals
             .iter()
-            .filter(|s| s.interval_type == "1min")
+            .filter(|s| s.interval_type == IntervalType::Min1)
             .collect();
         one_min.sort_by_key(|s| s.interval_index);
         let indices: Vec<usize> = one_min.iter().map(|s| s.interval_index).collect();
@@ -1095,17 +1110,83 @@ mod tests {
 
     #[test]
     fn test_training_speed_zero_buffer_moving_only() {
-        // With buffer=0 and all-moving track, training speed equals the direct distance/time ratio.
         let step_km = 30.0_f64 / 360.0;
         let points: Vec<AnalyzePoint> = (0..6)
             .map(|i| make_analyze_point_with_speed(i as f64 * 10.0, i as f64 * step_km, 30.0))
             .collect();
         let training = compute_training_speed_kmh(&points, 3.0, 0.0);
         assert!(training > 0.0);
-        // With no stops and zero buffer, all segments included → speed ≈ 30 km/h
         assert!(
             (training - 30.0).abs() < 1.0,
             "expected ~30 km/h, got {training:.2}"
         );
+    }
+
+    // --- compute_elevation_gain_m tests ---
+
+    #[test]
+    fn test_elevation_gain_no_altitude_returns_none() {
+        let points: Vec<AnalyzePoint> = (0..5)
+            .map(|i| make_analyze_point(i as f64 * 10.0, i as f64 * 0.1))
+            .collect();
+        assert_eq!(compute_elevation_gain_m(&points), None);
+    }
+
+    #[test]
+    fn test_elevation_gain_flat_returns_zero() {
+        let mut points: Vec<AnalyzePoint> = (0..5)
+            .map(|i| make_analyze_point(i as f64 * 10.0, i as f64 * 0.1))
+            .collect();
+        for p in &mut points {
+            p.smoothed_alt = Some(100.0);
+        }
+        assert_eq!(compute_elevation_gain_m(&points), Some(0.0));
+    }
+
+    #[test]
+    fn test_elevation_gain_monotone_climb() {
+        let mut points: Vec<AnalyzePoint> = (0..5)
+            .map(|i| make_analyze_point(i as f64 * 10.0, i as f64 * 0.1))
+            .collect();
+        for (i, p) in points.iter_mut().enumerate() {
+            p.smoothed_alt = Some(100.0 + i as f64 * 10.0);
+        }
+        let gain = compute_elevation_gain_m(&points).unwrap();
+        assert!((gain - 40.0).abs() < 1e-9, "expected 40 m, got {gain}");
+    }
+
+    #[test]
+    fn test_elevation_gain_downhill_only_returns_zero() {
+        let mut points: Vec<AnalyzePoint> = (0..5)
+            .map(|i| make_analyze_point(i as f64 * 10.0, i as f64 * 0.1))
+            .collect();
+        for (i, p) in points.iter_mut().enumerate() {
+            p.smoothed_alt = Some(500.0 - i as f64 * 20.0);
+        }
+        assert_eq!(compute_elevation_gain_m(&points), Some(0.0));
+    }
+
+    #[test]
+    fn test_elevation_gain_isolated_altitude_returns_none() {
+        let mut points: Vec<AnalyzePoint> = (0..4)
+            .map(|i| make_analyze_point(i as f64 * 10.0, i as f64 * 0.1))
+            .collect();
+        points[2].smoothed_alt = Some(100.0);
+        assert_eq!(compute_elevation_gain_m(&points), None);
+    }
+
+    #[test]
+    fn test_elevation_gain_skips_gaps_in_altitude() {
+        let mut points: Vec<AnalyzePoint> = (0..5)
+            .map(|i| make_analyze_point(i as f64 * 10.0, i as f64 * 0.1))
+            .collect();
+        points[0].smoothed_alt = Some(100.0);
+        points[1].smoothed_alt = None;
+        points[2].smoothed_alt = Some(200.0);
+        points[3].smoothed_alt = Some(300.0);
+        points[4].smoothed_alt = None;
+        // Pairs (0,1): skipped (None). (1,2): skipped (None). (2,3): +100. (3,4): skipped (None).
+        let gain = compute_elevation_gain_m(&points).unwrap();
+        assert!((gain - 100.0).abs() < 1e-9, "expected 100 m, got {gain}");
     }
 }

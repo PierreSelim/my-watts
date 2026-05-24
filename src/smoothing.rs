@@ -12,10 +12,6 @@ pub fn smooth_track(track: &Track, config: SavitzkyGolayConfig) -> Result<Track,
         ));
     }
 
-    if poly_degree >= window_size {
-        return Err(GpsAnalyzerError::PolynomialDegreeTooLarge);
-    }
-
     let half_window = window_size / 2;
 
     let mut smoothed_points = Vec::with_capacity(track.points.len());
@@ -71,18 +67,19 @@ fn savitzky_golay_smooth(
 ) -> Result<f64, GpsAnalyzerError> {
     let n = values.len();
     if n < poly_degree + 1 {
-        return Err(GpsAnalyzerError::PolynomialDegreeTooLarge);
+        return Err(GpsAnalyzerError::NumericalError(format!(
+            "polynomial degree {poly_degree} requires at least {} points; boundary window has {n}",
+            poly_degree + 1
+        )));
     }
 
-    // Build design matrix: each row is [x^0, x^1, ..., x^poly_degree] for each point
     let mut design = DMatrix::<f64>::zeros(n, poly_degree + 1);
-    for (i, _) in values.iter().enumerate() {
+    for i in 0..n {
         for j in 0..=poly_degree {
             design[(i, j)] = (i as f64 - point_index as f64).powi(j as i32);
         }
     }
 
-    // Build observation vector
     let observations = DVector::from_row_slice(values);
 
     // Solve normal equations: (X^T X)^-1 X^T y
@@ -90,9 +87,11 @@ fn savitzky_golay_smooth(
     let xtx = &xt * &design;
     let xty = &xt * &observations;
 
-    let coeffs = xtx.try_inverse().ok_or(GpsAnalyzerError::ParseError(
-        "Cannot invert design matrix".to_string(),
-    ))? * xty;
+    let coeffs = xtx.try_inverse().ok_or_else(|| {
+        GpsAnalyzerError::NumericalError(
+            "cannot invert Vandermonde normal-equation matrix".to_string(),
+        )
+    })? * xty;
 
     // x=0 by construction (center point), so the polynomial evaluates to its constant term
     Ok(coeffs[0])
@@ -123,7 +122,6 @@ mod tests {
         let smoothed = smooth_track(&track, config).expect("Failed to smooth");
 
         assert_eq!(smoothed.len(), track.len());
-        // Linear sequence with degree 1 should reproduce exactly
         for i in 0..track.len() {
             assert!((smoothed.points[i].lat - track.points[i].lat).abs() < 1e-10);
         }
@@ -136,7 +134,6 @@ mod tests {
         let smoothed = smooth_track(&track, config).expect("Failed to smooth");
 
         assert_eq!(smoothed.len(), track.len());
-        // Check that smoothed values are within expected range
         for point in smoothed.points.iter() {
             assert!(point.lat.is_finite());
         }

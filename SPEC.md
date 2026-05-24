@@ -268,15 +268,18 @@ Bucket assignment uses integer arithmetic to avoid floating-point drift at bound
 After writing both files, always printed to stderr:
 
 ```
-Elapsed: HH:MM:SS | Moving: HH:MM:SS | Distance: X.XX km | Avg speed: X.X km/h | Training speed: X.X km/h | Avg power: X W | Calories: X kcal | Elevation: X m
+Elapsed: HH:MM:SS | Moving: HH:MM:SS | Distance: X.XX km | Elapsed avg: X.X km/h | Moving avg: X.X km/h | Training: X.X km/h | Avg power: X W | Calories: X kcal | Elevation: X m
 Speed (moving) | P25: X.X km/h | Median: X.X km/h | P75: X.X km/h
 N points → <analyze.csv path>
 M interval rows → <intervals.csv path>
 ```
 
-`Elevation` is the total elevation gain (sum of positive altitude deltas over consecutive smoothed points), in metres. It is always printed; it is 0 when no elevation data is present.
+The three speed metrics are:
+- **Elapsed avg** — `distance / elapsed_time`: the slowest metric, penalises all stops and pauses.
+- **Moving avg** — `distance / moving_time`: excludes time spent below `moving_speed_threshold_kmh`.
+- **Training** — distance and time outside stop-buffer zones only; see "Algorithm: Training Speed" below.
 
-**Training speed** is the average speed computed over time segments that are not within `--stop-buffer-secs` seconds of any stop. Stops are detected using the bike's `moving_speed_threshold_kmh`. This metric strips deceleration and acceleration phases around stops, giving a cleaner picture of riding effort than `Avg speed`. See "Algorithm: Training Speed" below.
+`Elevation` is the total elevation gain (sum of positive altitude deltas over consecutive smoothed points), in metres. It is always printed; it is 0 when no elevation data is present.
 
 The quartile line reports speed percentiles over moving points only (filtered by the bike's `moving_speed_threshold_kmh`). If no moving points exist, each value is printed as `N/A`.
 
@@ -306,7 +309,7 @@ Two chart panels stacked vertically, with a one-line status bar below:
 │    yellow = smoothed instant power                  │
 │    green  = cumulative average power                │
 ├─────────────────────────────────────────────────────┤
-│  Dist | Elapsed | Moving | Avg speed | Training speed | Avg power | Elevation | [q] quit  │
+│  Dist | Elapsed | Moving | Moving avg | Training speed | Avg power | Elevation | [q] quit  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -315,7 +318,7 @@ Two chart panels stacked vertically, with a one-line status bar below:
 - Y axis (power): rounded up to the nearest 50 W
 - Altitude is normalized to the speed y-range so it overlays on the same axis; the actual min–max in metres is shown in the panel title. If the GPX contains no elevation data, the altitude series is omitted.
 - Power values where no 4-second window exists are rendered as 0 W
-- Status bar line 1 shows: Dist, Elapsed, Moving, Avg speed, Training speed, Avg power, Elevation (omitted if no elevation data), [q] quit
+- Status bar line 1 shows: Dist, Elapsed, Moving, Moving avg, Training speed, Avg power, Elevation (omitted if no elevation data), [q] quit
 - Status bar line 2 shows: Speed (moving) quartiles — P25, Median, P75; `N/A` when no moving points exist
 - The first four column separators align vertically between the two status bar lines
 
@@ -328,9 +331,9 @@ Two chart panels stacked vertically, with a one-line status bar below:
 
 ### Algorithm: Training Speed
 
-Training speed differs from `Avg speed` in two ways:
+Training speed differs from **Moving avg** in two ways:
 
-1. **Stop detection** — same threshold as `Avg speed` (`moving_speed_threshold_kmh`).
+1. **Stop detection** — same threshold as Moving avg (`moving_speed_threshold_kmh`).
 2. **Buffer exclusion** — additionally excludes `--stop-buffer-secs` seconds before and after every stop, removing deceleration and acceleration phases.
 
 **Two-pass algorithm** (implemented in `analyze::compute_training_speed_kmh`):
@@ -340,7 +343,7 @@ Training speed differs from `Avg speed` in two ways:
 3. For each consecutive pair of `AnalyzePoint`s, include the segment's `Δdistance` and `Δtime` only when **neither** endpoint's `seconds_from_start` falls inside any buffered zone.
 4. Return `Σdistance_km / (Σtime_secs / 3600)`, or 0.0 if no segments remain.
 
-Setting `--stop-buffer-secs 0` makes Training speed identical to `Avg speed` (excluding full stops only, no deceleration buffer).
+Setting `--stop-buffer-secs 0` makes Training speed identical to Moving avg (excluding full stops only, no deceleration buffer).
 
 ### Testing
 

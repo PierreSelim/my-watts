@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use std::fmt;
 use thiserror::Error;
 
 pub mod analyze;
@@ -9,6 +10,32 @@ pub mod power;
 pub mod smoothing;
 pub mod stats;
 pub mod tui;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntervalType {
+    Min1,
+    Min5,
+    Min10,
+    Min30,
+    Km1,
+    Km5,
+    Km10,
+}
+
+impl fmt::Display for IntervalType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            IntervalType::Min1 => "1min",
+            IntervalType::Min5 => "5min",
+            IntervalType::Min10 => "10min",
+            IntervalType::Min30 => "30min",
+            IntervalType::Km1 => "1km",
+            IntervalType::Km5 => "5km",
+            IntervalType::Km10 => "10km",
+        };
+        write!(f, "{s}")
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct GpsPoint {
@@ -31,13 +58,9 @@ impl Track {
         Ok(Track { points })
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.points.len()
-    }
-
-    /// Always returns `false`: `Track::new` rejects empty point lists.
-    pub fn is_empty(&self) -> bool {
-        self.points.is_empty()
     }
 }
 
@@ -86,7 +109,7 @@ pub struct SavitzkyGolayConfig {
 impl SavitzkyGolayConfig {
     pub fn new(window_size: u32, polynomial_degree: u32) -> Result<Self, GpsAnalyzerError> {
         let window_size = WindowSize::new(window_size)?;
-        if polynomial_degree >= window_size.get() {
+        if polynomial_degree > window_size.get() / 2 {
             return Err(GpsAnalyzerError::PolynomialDegreeTooLarge);
         }
         Ok(SavitzkyGolayConfig {
@@ -115,7 +138,7 @@ pub struct AnalyzePoint {
 
 #[derive(Debug, Clone)]
 pub struct IntervalSummary {
-    pub interval_type: String,
+    pub interval_type: IntervalType,
     pub interval_index: usize,
     pub start_timestamp: DateTime<Utc>,
     pub end_timestamp: DateTime<Utc>,
@@ -126,7 +149,7 @@ pub struct IntervalSummary {
 }
 
 pub fn fmt_hhmmss(total_secs: f64) -> String {
-    let secs = total_secs as u64;
+    let secs = total_secs.max(0.0) as u64;
     format!(
         "{:02}:{:02}:{:02}",
         secs / 3600,
@@ -149,6 +172,9 @@ pub enum GpsAnalyzerError {
     #[error("Window size {0} is larger than track length {1}")]
     WindowSizeTooLarge(u32, usize),
 
+    #[error("Track must have at least {0} points")]
+    TrackTooShort(usize),
+
     #[error("Invalid GPX format: {0}")]
     InvalidGpx(String),
 
@@ -158,11 +184,17 @@ pub enum GpsAnalyzerError {
     #[error("CSV error: {0}")]
     Csv(String),
 
-    #[error("Polynomial degree must be less than window size")]
+    #[error("Polynomial degree must be at most half the window size")]
     PolynomialDegreeTooLarge,
 
     #[error("Parsing error: {0}")]
     ParseError(String),
+
+    #[error("Non-positive time delta ({0:.3}s) between consecutive GPS points")]
+    NonPositiveTimeDelta(f64),
+
+    #[error("Numerical error: {0}")]
+    NumericalError(String),
 
     #[error("Config error: {0}")]
     ConfigError(String),
@@ -207,13 +239,17 @@ mod tests {
     }
 
     #[test]
-    fn test_savitzky_golay_config_degree_must_be_less_than_window() {
+    fn test_savitzky_golay_config_degree_at_most_half_window() {
+        // max degree = window_size / 2 (integer division)
+        assert!(SavitzkyGolayConfig::new(3, 0).is_ok()); // 0 <= 1
+        assert!(SavitzkyGolayConfig::new(3, 1).is_ok()); // 1 <= 1
+        assert!(SavitzkyGolayConfig::new(3, 2).is_err()); // 2 > 1
         assert!(SavitzkyGolayConfig::new(3, 3).is_err());
-        assert!(SavitzkyGolayConfig::new(3, 4).is_err());
+        assert!(SavitzkyGolayConfig::new(5, 2).is_ok()); // 2 <= 2
+        assert!(SavitzkyGolayConfig::new(5, 3).is_err()); // 3 > 2
         assert!(SavitzkyGolayConfig::new(5, 5).is_err());
-        assert!(SavitzkyGolayConfig::new(5, 2).is_ok());
-        assert!(SavitzkyGolayConfig::new(3, 0).is_ok());
-        assert!(SavitzkyGolayConfig::new(3, 2).is_ok());
+        assert!(SavitzkyGolayConfig::new(7, 3).is_ok()); // 3 <= 3
+        assert!(SavitzkyGolayConfig::new(7, 4).is_err()); // 4 > 3
     }
 
     #[test]

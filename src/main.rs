@@ -56,25 +56,19 @@ fn run_power(cmd: &cli::PowerCommand) -> Result<(), GpsAnalyzerError> {
         eprintln!("Loaded {} points", track.len());
     }
 
-    let app_config = AppConfig::load_or_default(cmd.config.as_deref())?;
-
-    let bike = app_config
-        .find_bike(&cmd.bike)
-        .ok_or_else(|| GpsAnalyzerError::BikeNotFound(cmd.bike.clone()))?
-        .clone();
+    let power_config = load_power_config(
+        cmd.config.as_deref(),
+        Some(cmd.rider_weight),
+        cmd.bike_weight,
+        Some(&cmd.bike),
+    )?;
 
     if cmd.verbose {
         eprintln!(
             "Using bike '{}' (Crr={}, CdA={})",
-            bike.name, bike.crr, bike.cda
+            power_config.bike.name, power_config.bike.crr, power_config.bike.cda
         );
     }
-
-    let power_config = power::PowerConfig {
-        rider_weight_kg: cmd.rider_weight,
-        bike_weight_kg: cmd.bike_weight,
-        bike,
-    };
 
     let points = power::compute_power(&track, &power_config)?;
 
@@ -143,21 +137,21 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
     csv::write_analyze_csv(&analyze_points, &analyze_path)?;
     csv::write_intervals_csv(&intervals, &intervals_path)?;
 
-    let total_distance_km = analyze_points.last().map(|p| p.distance_km).unwrap_or(0.0);
-    let elapsed_secs = analyze_points
-        .last()
-        .map(|p| p.seconds_from_start)
-        .unwrap_or(0.0);
-    let moving_secs = analyze_points
-        .last()
-        .map(|p| p.moving_seconds_from_start)
-        .unwrap_or(0.0);
-    let avg_speed_kmh = analyze_points
-        .last()
-        .map(|p| p.average_speed_kmh)
-        .unwrap_or(0.0);
-    let training_speed_kmh =
-        analyze::compute_training_speed_kmh(&analyze_points, moving_speed_threshold_kmh, cmd.stop_buffer_secs);
+    let last = analyze_points.last().ok_or(GpsAnalyzerError::EmptyTrack)?;
+    let total_distance_km = last.distance_km;
+    let elapsed_secs = last.seconds_from_start;
+    let moving_secs = last.moving_seconds_from_start;
+    let elapsed_avg_speed_kmh = if elapsed_secs > 0.0 {
+        total_distance_km / (elapsed_secs / 3600.0)
+    } else {
+        0.0
+    };
+    let moving_avg_speed_kmh = last.average_speed_kmh;
+    let training_speed_kmh = analyze::compute_training_speed_kmh(
+        &analyze_points,
+        moving_speed_threshold_kmh,
+        cmd.stop_buffer_secs,
+    );
     let moving_power: Vec<f64> = power_points
         .iter()
         .filter(|p| p.speed_ms * 3.6 >= moving_speed_threshold_kmh)
@@ -168,26 +162,16 @@ fn run_analyze(cmd: &cli::AnalyzeCommand) -> Result<(), GpsAnalyzerError> {
     } else {
         moving_power.iter().sum::<f64>() / moving_power.len() as f64
     };
-    let total_calories_kcal = analyze_points
-        .last()
-        .and_then(|p| p.cumulative_energy_kj)
-        .map(kj_to_kcal)
-        .unwrap_or(0.0);
-    let total_elevation_gain_m: f64 = analyze_points
-        .windows(2)
-        .filter_map(|w| {
-            let curr = w[1].smoothed_alt?;
-            let prev = w[0].smoothed_alt?;
-            Some((curr - prev).max(0.0))
-        })
-        .sum();
+    let total_calories_kcal = last.cumulative_energy_kj.map(kj_to_kcal).unwrap_or(0.0);
+    let total_elevation_gain_m = analyze::compute_elevation_gain_m(&analyze_points).unwrap_or(0.0);
 
     eprintln!(
-        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Avg speed: {:.1} km/h | Training speed: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal | Elevation: {:.0} m",
+        "Elapsed: {} | Moving: {} | Distance: {:.2} km | Elapsed avg: {:.1} km/h | Moving avg: {:.1} km/h | Training: {:.1} km/h | Avg power: {:.0} W | Calories: {:.0} kcal | Elevation: {:.0} m",
         fmt_hhmmss(elapsed_secs),
         fmt_hhmmss(moving_secs),
         total_distance_km,
-        avg_speed_kmh,
+        elapsed_avg_speed_kmh,
+        moving_avg_speed_kmh,
         training_speed_kmh,
         avg_power_watts,
         total_calories_kcal,

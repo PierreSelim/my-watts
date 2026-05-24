@@ -2,6 +2,10 @@ use crate::GpsAnalyzerError;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+fn env_or_dot(var: &str) -> PathBuf {
+    PathBuf::from(std::env::var(var).unwrap_or_else(|_| ".".to_string()))
+}
+
 fn default_moving_speed_threshold_kmh() -> f64 {
     3.0
 }
@@ -45,13 +49,11 @@ impl Default for AppConfig {
 pub fn my_watts_home_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".my-watts")
+        env_or_dot("USERPROFILE").join(".my-watts")
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".my-watts")
+        env_or_dot("HOME").join(".my-watts")
     }
 }
 
@@ -63,13 +65,11 @@ impl AppConfig {
     pub fn default_config_path() -> PathBuf {
         #[cfg(target_os = "windows")]
         {
-            let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(appdata).join("my-watts").join("config.toml")
+            env_or_dot("APPDATA").join("my-watts").join("config.toml")
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home)
+            env_or_dot("HOME")
                 .join(".config")
                 .join("my-watts")
                 .join("config.toml")
