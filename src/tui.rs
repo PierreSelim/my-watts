@@ -588,6 +588,8 @@ mod tests {
         assert!(data.average_power_series.iter().all(|(_, w)| *w == 0.0));
     }
 
+    // Test helper mirroring every RideSummary field; the long arg list is intentional.
+    #[allow(clippy::too_many_arguments)]
     fn make_summary(
         total_distance_km: f64,
         elapsed_secs: f64,

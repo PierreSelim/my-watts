@@ -19,7 +19,9 @@ src/
 ├── power.rs         # Physics-based power estimation
 ├── stats.rs         # Speed quartiles and other descriptive statistics
 ├── csv.rs           # CSV output writers
-└── tui.rs           # Interactive ratatui terminal plot
+├── index.rs         # Persistent ride index (JSON) and upsert logic
+├── tui.rs           # Interactive ratatui terminal plot
+└── list_tui.rs      # Interactive ratatui ride-list table
 ```
 
 ## Key Types
@@ -74,6 +76,13 @@ struct SavitzkyGolayConfig {
 }
 ```
 
+### `RideIndex` / `RideEntry`
+Defined in `index.rs` and serialized as JSON at `config::index_path()` (`~/.my-watts/index.json`).
+`RideEntry` holds the metrics shown in the `list` table plus the paths and `ReplayParams` needed to
+re-run `analyze` on the ride. `RideIndex::upsert` keys on `analyze_csv_path` (replace, not append)
+and keeps entries sorted by `start_timestamp`, most recent first. Load/save tolerate a missing file
+(empty index); callers in `analyze` treat any index error as a warning, not a failure.
+
 ## Data Flow
 
 **smooth / power / analyze commands:**
@@ -83,6 +92,7 @@ load_gpx() → Track
     → compute_power() → Vec<PowerPoint>
       → analyze_track() → (Vec<AnalyzePoint>, Vec<IntervalSummary>)
         → write_analyze_csv() / write_intervals_csv()
+          → RideIndex::upsert() + save()   (analyze only; warn-on-failure)
 ```
 
 **plot command** (no CSV output):
@@ -90,6 +100,14 @@ load_gpx() → Track
 load_gpx() → smooth → compute_power → analyze_track
   → build_plot_data() → PlotData
     → run_tui()   (ratatui event loop, q/Esc to exit)
+```
+
+**list command:**
+```
+RideIndex::load() → [RideEntry]
+  → run_list_tui()   (ratatui table; ↑↓ navigate, q/Esc quit)
+    → on Enter: replay the selected entry through analyze_pipeline → run_tui(),
+      then return to the list (replay errors surface as an inline status line)
 ```
 
 ### Altitude through the pipeline

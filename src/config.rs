@@ -61,6 +61,10 @@ pub fn analysis_dir() -> PathBuf {
     my_watts_home_dir().join("analysis")
 }
 
+pub fn index_path() -> PathBuf {
+    my_watts_home_dir().join("index.json")
+}
+
 impl AppConfig {
     pub fn default_config_path() -> PathBuf {
         #[cfg(target_os = "windows")]
@@ -327,7 +331,7 @@ cda = 0.32
 
     #[test]
     fn test_load_or_default_uses_home_config_when_xdg_absent() {
-        let mut temp_home = tempfile::tempdir().unwrap();
+        let temp_home = tempfile::tempdir().unwrap();
         let home_config = temp_home.path().join(".my-watts").join("config.toml");
         std::fs::create_dir_all(home_config.parent().unwrap()).unwrap();
         std::fs::write(&home_config, "default_rider_weight_kg = 90.0\n").unwrap();
@@ -366,5 +370,12 @@ cda = 0.32
         let home = my_watts_home_dir();
         let analysis = analysis_dir();
         assert_eq!(analysis.parent().unwrap(), home);
+    }
+
+    #[test]
+    fn test_index_path_is_index_json_inside_my_watts_home() {
+        let path = index_path();
+        assert_eq!(path.file_name().unwrap(), "index.json");
+        assert_eq!(path.parent().unwrap(), my_watts_home_dir());
     }
 }

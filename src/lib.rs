@@ -6,6 +6,8 @@ pub mod analyze;
 pub mod config;
 pub mod csv;
 pub mod gpx;
+pub mod index;
+pub mod list_tui;
 pub mod power;
 pub mod smoothing;
 pub mod stats;
@@ -80,6 +82,8 @@ pub fn power_pipeline(
 pub struct AnalyzeSummary {
     pub point_count: usize,
     pub interval_count: usize,
+    /// Timestamp of the first GPS point — the ride's start time.
+    pub start_timestamp: DateTime<Utc>,
     pub total_distance_km: f64,
     pub elapsed_secs: f64,
     pub moving_secs: f64,
@@ -131,6 +135,8 @@ pub fn analyze_pipeline(
     csv::write_analyze_csv(&analyze_points, analyze_out)?;
     csv::write_intervals_csv(&intervals, intervals_out)?;
 
+    let first = analyze_points.first().ok_or(GpsAnalyzerError::EmptyTrack)?;
+    let start_timestamp = first.timestamp;
     let last = analyze_points.last().ok_or(GpsAnalyzerError::EmptyTrack)?;
     let elapsed_secs = last.seconds_from_start;
     let total_distance_km = last.distance_km;
@@ -165,6 +171,7 @@ pub fn analyze_pipeline(
     Ok(AnalyzeSummary {
         point_count: analyze_points.len(),
         interval_count: intervals.len(),
+        start_timestamp,
         total_distance_km,
         elapsed_secs,
         moving_secs: last.moving_seconds_from_start,
@@ -369,6 +376,9 @@ pub enum GpsAnalyzerError {
 
     #[error("Bike '{0}' not found in config")]
     BikeNotFound(String),
+
+    #[error("Index error: {0}")]
+    IndexError(String),
 }
 
 #[cfg(test)]
@@ -606,6 +616,11 @@ cda = 0.40
         assert!(summary.total_distance_km > 0.0);
         assert!(summary.elapsed_secs > 0.0);
         assert!(summary.total_elevation_gain_m > 0.0);
+        // start_timestamp is the first GPS point's time.
+        assert_eq!(
+            summary.start_timestamp,
+            "2024-01-01T10:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
 
         // per-point CSV: header + 5 rows
         let analyze_content = std::fs::read_to_string(analyze_out.path()).unwrap();

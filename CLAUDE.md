@@ -56,11 +56,16 @@ cargo test -- --test-threads=1  # Run tests sequentially
 
 ### Code Quality
 ```bash
-cargo fmt              # Format code with rustfmt (always run before commit)
-cargo clippy           # Lint with clippy (address all warnings)
-cargo clippy --fix     # Auto-fix clippy warnings where possible
-cargo check            # Quick compilation check
+cargo fmt --check                          # Verify formatting (CI uses this)
+cargo fmt                                   # Format code with rustfmt
+cargo clippy --all-targets -- -D warnings   # Lint exactly as CI does — must pass before pushing
+cargo clippy --fix                          # Auto-fix clippy warnings where possible
+cargo check                                 # Quick compilation check
 ```
+
+CI runs `cargo clippy --all-targets -- -D warnings`, which lints **test code too** and treats every
+warning as an error. Always run that exact command locally before committing — a plain `cargo clippy`
+skips `#[cfg(test)]` modules and will pass even when CI fails.
 
 ### Coverage
 ```bash
@@ -87,8 +92,10 @@ cargo tarpaulin --out Html  # Generate test coverage report
 - Consider property-based testing for complex logic.
 
 ### Linting & Formatting
-- All code must pass `cargo fmt` without modifications.
-- All code must pass `cargo clippy` without warnings. Suppress warnings only with documented justification.
+- All code must pass `cargo fmt --check` without modifications.
+- All code must pass `cargo clippy --all-targets -- -D warnings` (the CI command) — this lints test
+  code as well, so run it, not a bare `cargo clippy`. Suppress warnings only with a documented
+  `#[allow(...)]` and a justifying comment.
 - Run `cargo test` to ensure no regressions before committing.
 
 ## Workflow
@@ -98,5 +105,5 @@ cargo tarpaulin --out Html  # Generate test coverage report
 3. **Plan the types first** — design the data structures and types before writing logic. Strong typing guides implementation.
 4. **Implement with types** — let the compiler guide you. If types align, logic often follows.
 5. **Write tests** alongside implementation.
-6. **Run quality checks** — `cargo fmt`, `cargo clippy`, `cargo test` before marking as complete.
+6. **Run quality checks** — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` (the same commands CI runs) before marking as complete.
 7. If needed update SPEC.md, ARCHITECTURE.md and README.md

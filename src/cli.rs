@@ -34,7 +34,12 @@ pub enum Commands {
     Power(PowerCommand),
     /// Produce enriched per-point CSV and interval summary CSV from a GPX file
     Analyze(AnalyzeCommand),
+    /// Browse previously analyzed rides in an interactive table
+    List(ListCommand),
 }
+
+#[derive(Parser)]
+pub struct ListCommand {}
 
 #[derive(Parser)]
 pub struct SmoothCommand {

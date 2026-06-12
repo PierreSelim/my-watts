@@ -427,3 +427,96 @@ normalized_power_watts
 - Unit tests for distance-based and time-based segmentation, including partial final segments
 - Unit test for Normalized Power (constant power → NP equals that power)
 - Integration test: GPX → compute power → compute segments (entire ride) → write segments CSV
+
+---
+
+## Feature 5: Ride Index & List
+
+### Problem
+
+`analyze` writes per-ride CSVs into `~/.my-watts/analysis/`, but there is no way to see all
+previously analyzed rides at a glance or to re-open one without remembering its file path and the
+exact parameters it was analyzed with.
+
+### Solution
+
+Maintain a persistent index of analyzed rides and browse it from an interactive terminal table.
+The index is updated automatically as a side effect of `analyze`; a new `list` subcommand renders
+it and can re-open any ride's plot.
+
+### Index file
+
+A single JSON file at the my-watts home dir:
+
+- Windows: `%USERPROFILE%\.my-watts\index.json`
+- Unix: `~/.my-watts/index.json`
+
+Each ride is one entry containing the headline metrics shown in the table plus the source GPX
+path, output CSV paths, and the parameters needed to reproduce the analysis (rider/bike weights,
+bike name, config path, Savitzky-Golay window/degree, smooth window, stop-buffer seconds).
+
+Entries are keyed by their `analyze.csv` path: re-running `analyze` on the same input refreshes the
+existing entry rather than appending a duplicate. Entries are stored sorted by ride start time,
+most recent first.
+
+### Auto-update on `analyze`
+
+After `analyze` writes its CSVs and prints the summary, it upserts the ride into the index. Index
+read/write failures are **non-fatal**: a warning is printed to stderr and the command still
+succeeds (and still opens the plot). A corrupt index file is replaced by a fresh one on the next
+successful `analyze`.
+
+### CLI Interface
+
+```
+my-watts list
+
+Options:
+  -h, --help    Print help
+```
+
+The command takes no arguments. If the index is empty (or absent), it prints a hint to run
+`analyze` first and exits 0 without opening the TUI.
+
+### List TUI
+
+A scrollable table, one row per indexed ride, sorted most recent first:
+
+| Column | Source field |
+|--------|--------------|
+| `Date` | ride start timestamp, `YYYY-MM-DD HH:MM` |
+| `Ride` | input file stem (truncated with `…` past 25 chars) |
+| `Dist km` | total distance, 0.1 km |
+| `Elapsed` | elapsed time, `HH:MM:SS` |
+| `Moving` | moving time, `HH:MM:SS` |
+| `km/h` | moving average speed, 0.1 |
+| `Watts` | average power, 0 dp |
+| `Elev m` | total elevation gain, 0 dp |
+
+#### Interaction
+
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Move selection up |
+| `↓` / `j` | Move selection down |
+| `Enter` | Re-run `analyze` for the selected ride (using its stored parameters) and open the plot; returns to the list on exit |
+| `q` / `Esc` | Quit |
+
+The terminal is always restored on exit, including on I/O errors, the same as the `analyze` plot.
+Pressing `Enter` on a ride whose source GPX is missing (or otherwise fails to re-analyze) returns
+to the list with a one-line red error message; the list stays usable.
+
+### Error Handling
+
+- Missing index file → treated as an empty index (no error)
+- Corrupt index file on read during `list` → error (the command cannot show a broken index)
+- Corrupt index file on read during `analyze` → warning only; a new index is started
+- Replay of a ride whose GPX is missing → inline error in the list, not a crash
+
+### Testing
+
+- Unit tests for `RideIndex`: load-missing-returns-empty, save/load round-trip, upsert dedup by
+  analyze path, upsert keeps distinct paths, sort order most-recent-first, corrupt-file errors
+- Unit tests for `list_tui`: `format_row` column values, name truncation, selection navigation
+  (advance/clamp/empty), and draw-does-not-panic for empty / populated / status-line states
+- `analyze_pipeline` exposes `start_timestamp` (first GPS point) — asserted in the pipeline test
