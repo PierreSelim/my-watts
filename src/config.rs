@@ -76,8 +76,17 @@ impl AppConfig {
         }
     }
 
-    /// Load from an explicit path (must exist), or from the default path (falls back to built-in
-    /// defaults if not found).
+    /// Ordered list of paths probed when no explicit `--config` is given.
+    /// The first existing file wins. XDG/APPDATA has priority over the home-dir fallback.
+    pub fn config_search_paths() -> Vec<PathBuf> {
+        vec![
+            Self::default_config_path(),
+            my_watts_home_dir().join("config.toml"),
+        ]
+    }
+
+    /// Load from an explicit path (must exist), or probe `config_search_paths` in order
+    /// (falls back to built-in defaults if no file is found).
     pub fn load_or_default(config_path: Option<&Path>) -> Result<Self, GpsAnalyzerError> {
         match config_path {
             Some(path) => {
@@ -87,16 +96,16 @@ impl AppConfig {
                 Ok(Self::merge_with_builtin(config))
             }
             None => {
-                let default_path = Self::default_config_path();
-                if default_path.exists() {
-                    let content =
-                        std::fs::read_to_string(&default_path).map_err(GpsAnalyzerError::Io)?;
-                    let config: AppConfig = toml::from_str(&content)
-                        .map_err(|e| GpsAnalyzerError::ConfigError(e.to_string()))?;
-                    Ok(Self::merge_with_builtin(config))
-                } else {
-                    Ok(Self::builtin_defaults())
+                for path in Self::config_search_paths() {
+                    if path.exists() {
+                        let content =
+                            std::fs::read_to_string(&path).map_err(GpsAnalyzerError::Io)?;
+                        let config: AppConfig = toml::from_str(&content)
+                            .map_err(|e| GpsAnalyzerError::ConfigError(e.to_string()))?;
+                        return Ok(Self::merge_with_builtin(config));
+                    }
                 }
+                Ok(Self::builtin_defaults())
             }
         }
     }
@@ -306,6 +315,38 @@ cda = 0.32
         );
         assert_eq!(via_default.default_bike, via_builtin.default_bike);
         assert_eq!(via_default.bikes.len(), via_builtin.bikes.len());
+    }
+
+    #[test]
+    fn test_config_search_paths_xdg_is_first() {
+        let paths = AppConfig::config_search_paths();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(paths[0], AppConfig::default_config_path());
+        assert_eq!(paths[1], my_watts_home_dir().join("config.toml"));
+    }
+
+    #[test]
+    fn test_load_or_default_uses_home_config_when_xdg_absent() {
+        let mut temp_home = tempfile::tempdir().unwrap();
+        let home_config = temp_home.path().join(".my-watts").join("config.toml");
+        std::fs::create_dir_all(home_config.parent().unwrap()).unwrap();
+        std::fs::write(&home_config, "default_rider_weight_kg = 90.0\n").unwrap();
+
+        // Point HOME / USERPROFILE at temp dir so my_watts_home_dir() resolves there,
+        // while APPDATA / XDG config stays absent (no file at that path).
+        #[cfg(target_os = "windows")]
+        std::env::set_var("USERPROFILE", temp_home.path());
+        #[cfg(not(target_os = "windows"))]
+        std::env::set_var("HOME", temp_home.path());
+
+        let config = AppConfig::load_or_default(None).unwrap();
+
+        #[cfg(target_os = "windows")]
+        std::env::remove_var("USERPROFILE");
+        #[cfg(not(target_os = "windows"))]
+        std::env::remove_var("HOME");
+
+        assert_eq!(config.default_rider_weight_kg, 90.0);
     }
 
     #[test]

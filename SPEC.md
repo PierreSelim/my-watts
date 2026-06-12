@@ -101,9 +101,15 @@ Power is clamped to `≥ 0` (coasting/descending contributes zero).
 
 ### Configuration
 
-Bike parameters are stored in `config.toml` (TOML format).  
-Default location: `%APPDATA%\my-watts\config.toml` (Windows) or `~/.config/my-watts/config.toml` (Unix).  
-Falls back to built-in defaults if no file is found.
+Bike parameters are stored in `config.toml` (TOML format).
+When no `--config` flag is given, the following paths are probed **in order**; the first existing file wins:
+
+| Priority | Windows | Unix/macOS |
+|----------|---------|------------|
+| 1 (XDG)  | `%APPDATA%\my-watts\config.toml` | `~/.config/my-watts/config.toml` |
+| 2        | `%USERPROFILE%\.my-watts\config.toml` | `~/.my-watts/config.toml` |
+
+Falls back to built-in defaults if neither file is found.
 
 ```toml
 [[bikes]]
