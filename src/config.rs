@@ -61,6 +61,12 @@ pub fn analysis_dir() -> PathBuf {
     my_watts_home_dir().join("analysis")
 }
 
+/// Canonical store for analyzed GPX files. `analyze` copies each ride here so the index can be
+/// rebuilt from these files plus the user configuration alone.
+pub fn gpx_dir() -> PathBuf {
+    my_watts_home_dir().join("gpx")
+}
+
 pub fn index_path() -> PathBuf {
     my_watts_home_dir().join("index.json")
 }
@@ -370,6 +376,14 @@ cda = 0.32
         let home = my_watts_home_dir();
         let analysis = analysis_dir();
         assert_eq!(analysis.parent().unwrap(), home);
+    }
+
+    #[test]
+    fn test_gpx_dir_is_inside_my_watts_home() {
+        let home = my_watts_home_dir();
+        let gpx = gpx_dir();
+        assert_eq!(gpx.file_name().unwrap(), "gpx");
+        assert_eq!(gpx.parent().unwrap(), home);
     }
 
     #[test]

@@ -36,10 +36,54 @@ pub enum Commands {
     Analyze(AnalyzeCommand),
     /// Browse previously analyzed rides in an interactive table
     List(ListCommand),
+    /// Rebuild the ride index from scratch out of the GPX store and configuration
+    Reindex(ReindexCommand),
 }
 
 #[derive(Parser)]
 pub struct ListCommand {}
+
+/// Parameters applied uniformly to every ride when rebuilding the index. They mirror the
+/// `analyze` smoothing/power options because the original per-ride parameters cannot be
+/// recovered from the stored GPX files alone.
+#[derive(Parser)]
+pub struct ReindexCommand {
+    /// Savitzky-Golay window size (must be odd, default: 5)
+    #[arg(long, default_value = "5")]
+    pub window_size: u32,
+
+    /// Polynomial degree for smoothing (default: 2)
+    #[arg(long, default_value = "2")]
+    pub degree: u32,
+
+    /// Rider weight in kg (overrides config default of 75 kg)
+    #[arg(long)]
+    pub rider_weight: Option<f64>,
+
+    /// Bike weight in kg (default: 10.0)
+    #[arg(long, default_value = "10.0")]
+    pub bike_weight: f64,
+
+    /// Bike name from config (overrides config default of "road")
+    #[arg(long)]
+    pub bike: Option<String>,
+
+    /// Path to config file (default: platform config dir)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Half-window for instant speed and power smoothing (default: 5)
+    #[arg(long, default_value = "5")]
+    pub smooth_window: usize,
+
+    /// Seconds to exclude before and after each stop when computing Training speed (default: 10)
+    #[arg(long, default_value = "10.0")]
+    pub stop_buffer_secs: f64,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+}
 
 #[derive(Parser)]
 pub struct SmoothCommand {

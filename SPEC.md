@@ -520,3 +520,89 @@ to the list with a one-line red error message; the list stays usable.
 - Unit tests for `list_tui`: `format_row` column values, name truncation, selection navigation
   (advance/clamp/empty), and draw-does-not-panic for empty / populated / status-line states
 - `analyze_pipeline` exposes `start_timestamp` (first GPS point) — asserted in the pipeline test
+
+---
+
+## Feature 6: GPX Store & Index Rebuild
+
+### Problem
+
+`analyze` records each ride in `index.json` with `source_gpx_path` pointing at wherever the user's
+original GPX happened to live. If that file is moved, renamed, or deleted, the `list` replay breaks
+and there is no way to reconstruct the index. The index is not self-contained.
+
+### Solution
+
+Make `~/.my-watts/gpx/` the canonical home for analyzed GPX files: `analyze` copies each ride's
+source GPX into this store and indexes the managed copy. A new `reindex` subcommand rebuilds the
+index from scratch out of the store plus the user configuration alone.
+
+### GPX store
+
+A single directory under the my-watts home dir:
+
+- Windows: `%USERPROFILE%\.my-watts\gpx\`
+- Unix: `~/.my-watts/gpx/`
+
+Files are stored as `{INPUT_STEM}.gpx`. Two source files with the same stem map to the same store
+file (the later one wins) — consistent with the index, which already dedups rides by stem.
+
+### Copy-on-analyze
+
+After `analyze` writes its CSVs and prints the summary, it copies the source GPX into the store and
+sets the index entry's `source_gpx_path` to the managed copy. The copy is **non-fatal**: a failure
+prints a warning to stderr and the entry falls back to the original path, so the analysis still
+succeeds and opens its plot. Re-analyzing a file that is already in the store (e.g. via `list`
+replay or `reindex`) is a no-op copy.
+
+### CLI Interface
+
+```
+my-watts reindex [OPTIONS]
+
+Options:
+  --window-size <N>           Savitzky-Golay window size, must be odd (default: 5)
+  --degree <N>                Polynomial degree for smoothing (default: 2)
+  --rider-weight <KG>         Rider weight in kg (default: config or 75.0)
+  --bike-weight <KG>          Bike weight in kg (default: 10.0)
+  --bike <NAME>               Bike preset name (default: config or "road")
+  --config <FILE>             Path to config.toml (default: platform config dir)
+  --smooth-window <N>         Half-window for instant speed and power smoothing (default: 5)
+  --stop-buffer-secs <SECS>   Seconds to exclude before and after each stop (default: 10.0)
+  -v, --verbose               Enable verbose output
+  -h, --help                  Print help
+```
+
+### Behavior
+
+1. Enumerate every `*.gpx` in the store. If none exist, print a hint and exit 0 without touching
+   the index.
+2. Build a **fresh, empty** index. For each GPX, run the full analyze pipeline (no plot), write the
+   usual `analysis/` CSVs, and upsert the resulting entry.
+3. A GPX that fails to analyze (corrupt, too short) is skipped with a warning; it does not abort the
+   rebuild.
+4. Save the new index, **replacing** the previous `index.json`. Rides whose GPX is no longer in the
+   store therefore drop out.
+5. Print `Reindexed N rides (M skipped) → <index path>`.
+
+#### Limitation: uniform parameters
+
+The original per-ride parameters (rider/bike weights, bike, smoothing window, etc.) are **not**
+recoverable from the GPX files alone. `reindex` therefore applies the parameters from its CLI flags
+and configuration **uniformly** to every ride. This is the intended "rebuild from files plus user
+configuration" semantics; use `analyze` per ride if a specific ride needs different parameters.
+
+### Error Handling
+
+- Empty / missing store → hint and exit 0 (no index change)
+- A single unanalyzable GPX → skipped with a warning, rebuild continues
+- Failure to write the new index → fatal error (exit 1)
+
+### Testing
+
+- Unit tests for `storage`: copy keys by stem, copying an already-stored file is a no-op, same-stem
+  overwrite, enumerate lists only `.gpx` sorted, enumerate of a missing dir is empty
+- Unit tests for `reindex_pipeline`: builds one entry per valid GPX, skips an invalid file, writes
+  CSVs into the given analysis dir
+- Unit test for `build_ride_entry`: derives the stem from the source path and preserves paths/replay
+- Config test: `gpx_dir()` is `gpx` inside the my-watts home dir

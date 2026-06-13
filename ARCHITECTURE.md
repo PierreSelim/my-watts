@@ -20,6 +20,7 @@ src/
 ├── stats.rs         # Speed quartiles and other descriptive statistics
 ├── csv.rs           # CSV output writers
 ├── index.rs         # Persistent ride index (JSON) and upsert logic
+├── storage.rs       # GPX store: copy analyzed files into ~/.my-watts/gpx, enumerate them
 ├── tui.rs           # Interactive ratatui terminal plot
 └── list_tui.rs      # Interactive ratatui ride-list table
 ```
@@ -83,6 +84,15 @@ re-run `analyze` on the ride. `RideIndex::upsert` keys on `analyze_csv_path` (re
 and keeps entries sorted by `start_timestamp`, most recent first. Load/save tolerate a missing file
 (empty index); callers in `analyze` treat any index error as a warning, not a failure.
 
+`build_ride_entry` (in `lib.rs`) assembles a `RideEntry` from a finished `AnalyzeSummary` plus the
+source/output paths and `ReplayParams`; it is shared by `analyze` (single ride) and `reindex` (bulk).
+
+### GPX store (`storage.rs`)
+`analyze` copies each source GPX into `config::gpx_dir()` (`~/.my-watts/gpx`) via `store_gpx`, keyed
+by file stem, and indexes the managed copy so the index is reproducible from the store alone. The
+`*_in` variants take an explicit directory and carry the logic (testable without touching the real
+home dir); the public `store_gpx` / `stored_gpx_files` wrap them with `config::gpx_dir()`.
+
 ## Data Flow
 
 **smooth / power / analyze commands:**
@@ -109,6 +119,17 @@ RideIndex::load() → [RideEntry]
     → on Enter: replay the selected entry through analyze_pipeline → run_tui(),
       then return to the list (replay errors surface as an inline status line)
 ```
+
+**reindex command:**
+```
+storage::stored_gpx_files()  →  [gpx paths in ~/.my-watts/gpx]
+  → reindex_pipeline(): for each → analyze_pipeline() → build_ride_entry()
+      (failures collected as `skipped`, not fatal)
+    → fresh RideIndex → save_default()   (replaces the previous index.json)
+```
+
+The `analyze` command additionally copies its source GPX into the store (`storage::store_gpx`,
+non-fatal) before upserting, so `source_gpx_path` in the index points at the managed copy.
 
 ### Altitude through the pipeline
 `GpsPoint.alt` is smoothed by Savitzky-Golay alongside lat/lon. The smoothed value is stored as `AnalyzePoint.smoothed_alt`. Elevation gain (sum of positive consecutive deltas) is derived from this field both in the CLI summary and in `PlotData.summary`. In the TUI, altitude is normalized to the speed y-range for overlay on the speed chart; the actual min–max is shown in the panel title.

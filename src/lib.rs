@@ -11,6 +11,7 @@ pub mod list_tui;
 pub mod power;
 pub mod smoothing;
 pub mod stats;
+pub mod storage;
 pub mod tui;
 
 use std::path::Path;
@@ -184,6 +185,90 @@ pub fn analyze_pipeline(
         moving_speed_quartiles,
         plot_data,
     })
+}
+
+/// Outcome of a `reindex` run: the freshly built index plus any GPX files that could not be
+/// analyzed (kept so the caller can report them without aborting the whole rebuild).
+#[derive(Debug)]
+pub struct ReindexResult {
+    pub index: index::RideIndex,
+    pub skipped: Vec<(std::path::PathBuf, GpsAnalyzerError)>,
+}
+
+/// Rebuild a ride index from scratch out of `gpx_files`, writing each ride's CSVs into
+/// `analysis_dir` and applying `replay_template` (rider/bike/smoothing parameters) uniformly —
+/// the original per-ride parameters are not recoverable from the GPX alone. Files that fail to
+/// analyze are collected in `skipped` rather than aborting the rebuild.
+pub fn reindex_pipeline(
+    gpx_files: &[std::path::PathBuf],
+    analysis_dir: &Path,
+    sg_config: SavitzkyGolayConfig,
+    power_config: &power::PowerConfig,
+    smooth_window: usize,
+    stop_buffer_secs: f64,
+    replay_template: &index::ReplayParams,
+) -> ReindexResult {
+    let mut index = index::RideIndex::default();
+    let mut skipped = Vec::new();
+    for gpx in gpx_files {
+        let stem = gpx
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let analyze_out = analysis_dir.join(format!("{stem}.analyze.csv"));
+        let intervals_out = analysis_dir.join(format!("{stem}.intervals.csv"));
+        match analyze_pipeline(
+            gpx,
+            &analyze_out,
+            &intervals_out,
+            sg_config,
+            power_config,
+            smooth_window,
+            stop_buffer_secs,
+        ) {
+            Ok(summary) => index.upsert(build_ride_entry(
+                gpx.clone(),
+                analyze_out,
+                intervals_out,
+                replay_template.clone(),
+                &summary,
+            )),
+            Err(e) => skipped.push((gpx.clone(), e)),
+        }
+    }
+    ReindexResult { index, skipped }
+}
+
+/// Assemble a `RideEntry` from a finished analysis. Shared by `analyze` (single ride) and
+/// `reindex` (bulk rebuild) so both record rides identically. The stem is derived from
+/// `source_gpx_path`.
+pub fn build_ride_entry(
+    source_gpx_path: std::path::PathBuf,
+    analyze_csv_path: std::path::PathBuf,
+    intervals_csv_path: std::path::PathBuf,
+    replay: index::ReplayParams,
+    summary: &AnalyzeSummary,
+) -> index::RideEntry {
+    let stem = source_gpx_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    index::RideEntry {
+        stem,
+        source_gpx_path,
+        analyze_csv_path,
+        intervals_csv_path,
+        start_timestamp: summary.start_timestamp,
+        indexed_at: Utc::now(),
+        distance_km: summary.total_distance_km,
+        elapsed_secs: summary.elapsed_secs,
+        moving_secs: summary.moving_secs,
+        moving_avg_speed_kmh: summary.moving_avg_speed_kmh,
+        avg_power_watts: summary.avg_power_watts,
+        total_calories_kcal: summary.total_calories_kcal,
+        total_elevation_gain_m: summary.total_elevation_gain_m,
+        replay,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -652,6 +737,96 @@ cda = 0.40
 
         // Moving speed ≥ elapsed speed (moving time ≤ elapsed time)
         assert!(summary.moving_avg_speed_kmh >= summary.elapsed_avg_speed_kmh - 1e-9);
+    }
+
+    fn write_named_gpx(dir: &std::path::Path, name: &str, contents: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    fn sample_replay_params() -> index::ReplayParams {
+        index::ReplayParams {
+            rider_weight_kg: 75.0,
+            bike_weight_kg: 10.0,
+            bike_name: "road".to_string(),
+            config_path: None,
+            window_size: 3,
+            degree: 1,
+            smooth_window: 1,
+            stop_buffer_secs: 10.0,
+        }
+    }
+
+    #[test]
+    fn test_build_ride_entry_derives_stem_and_keeps_paths() {
+        let gpx = write_gpx_temp();
+        let analyze_out = tempfile::NamedTempFile::new().unwrap();
+        let intervals_out = tempfile::NamedTempFile::new().unwrap();
+        let sg = SavitzkyGolayConfig::new(3, 1).unwrap();
+        let power_config = load_power_config(None, Some(75.0), 10.0, Some("road")).unwrap();
+        let summary = analyze_pipeline(
+            gpx.path(),
+            analyze_out.path(),
+            intervals_out.path(),
+            sg,
+            &power_config,
+            1,
+            10.0,
+        )
+        .unwrap();
+
+        let entry = build_ride_entry(
+            std::path::PathBuf::from("/store/my-ride.gpx"),
+            std::path::PathBuf::from("/analysis/my-ride.analyze.csv"),
+            std::path::PathBuf::from("/analysis/my-ride.intervals.csv"),
+            sample_replay_params(),
+            &summary,
+        );
+
+        assert_eq!(entry.stem, "my-ride");
+        assert_eq!(
+            entry.source_gpx_path,
+            std::path::PathBuf::from("/store/my-ride.gpx")
+        );
+        assert_eq!(entry.distance_km, summary.total_distance_km);
+        assert_eq!(entry.replay, sample_replay_params());
+    }
+
+    #[test]
+    fn test_reindex_pipeline_builds_index_and_skips_invalid() {
+        let gpx_dir = tempfile::tempdir().unwrap();
+        let analysis_dir = tempfile::tempdir().unwrap();
+        write_named_gpx(gpx_dir.path(), "ride-a.gpx", FIVE_POINT_GPX);
+        write_named_gpx(gpx_dir.path(), "ride-b.gpx", FIVE_POINT_GPX);
+        write_named_gpx(gpx_dir.path(), "broken.gpx", "not a gpx file");
+
+        let gpx_files = storage::gpx_files_in(gpx_dir.path()).unwrap();
+        let sg = SavitzkyGolayConfig::new(3, 1).unwrap();
+        let power_config = load_power_config(None, Some(75.0), 10.0, Some("road")).unwrap();
+
+        let result = reindex_pipeline(
+            &gpx_files,
+            analysis_dir.path(),
+            sg,
+            &power_config,
+            1,
+            10.0,
+            &sample_replay_params(),
+        );
+
+        assert_eq!(result.index.rides.len(), 2);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].0.file_name().unwrap().to_string_lossy(),
+            "broken.gpx"
+        );
+        let stems: Vec<&str> = result.index.rides.iter().map(|e| e.stem.as_str()).collect();
+        assert!(stems.contains(&"ride-a"));
+        assert!(stems.contains(&"ride-b"));
+        // CSVs were written into the provided analysis dir.
+        assert!(analysis_dir.path().join("ride-a.analyze.csv").exists());
+        assert!(analysis_dir.path().join("ride-a.intervals.csv").exists());
     }
 
     #[test]

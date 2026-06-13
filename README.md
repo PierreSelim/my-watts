@@ -11,7 +11,7 @@ A Rust tool to analyze GPX files from bike tracking applications: smooth GPS dri
 - **Power Estimation**: Physics-based wattage from gravity, rolling resistance, and air drag
 - **Ride Analysis**: Per-point metrics, interval summaries (1/5/10/30 min and 1/5/10 km), and elevation gain
 - **Interactive Plot**: Terminal chart for speed, altitude, and power
-- **Ride Index**: Analyzed rides are indexed automatically and browsable in an interactive list
+- **Ride Index**: Analyzed rides are indexed automatically and browsable in an interactive list; the index can be rebuilt from scratch (`reindex`) out of the GPX store
 
 ## Building
 
@@ -21,7 +21,7 @@ cargo build --release
 
 ## Running
 
-Four subcommands are available: `smooth`, `power`, `analyze`, and `list`. See [SPEC.md](SPEC.md) for full option lists and output column definitions.
+Five subcommands are available: `smooth`, `power`, `analyze`, `list`, and `reindex`. See [SPEC.md](SPEC.md) for full option lists and output column definitions.
 
 ```bash
 # Smooth GPS drift only (writes CSV)
@@ -38,9 +38,12 @@ cargo run --release -- analyze my_ride.gpx --rider-weight 72 --stop-buffer-secs 
 
 # Browse previously analyzed rides; press Enter to re-open a ride's plot
 cargo run --release -- list
+
+# Rebuild the ride index from scratch out of the GPX store + config
+cargo run --release -- reindex --bike gravel --rider-weight 72
 ```
 
-`analyze` records each ride in an index automatically; `list` reads that index — no extra step is needed.
+`analyze` records each ride in an index automatically and copies the source GPX into `~/.my-watts/gpx/`; `list` reads that index — no extra step is needed. `reindex` rebuilds the index from the stored GPX files alone (applying its parameters uniformly to every ride).
 
 ## Output
 
@@ -49,8 +52,9 @@ cargo run --release -- list
 | `smooth`  | `input.smoothed.csv` — smoothed lat/lon/alt + original timestamp | current dir |
 | `power`   | `input.power.csv` — power, speed, gradient per segment | current dir |
 | `analyze` | `input.analyze.csv` — enriched per-point metrics<br>`input.intervals.csv` — aggregated summaries at 7 windows<br>Interactive terminal plot (skip with `--no-plot`) | `~/.my-watts/analysis/` (Unix)<br>`%USERPROFILE%\.my-watts\analysis\` (Windows) |
-| `analyze` | `index.json` — ride index (updated automatically) | `~/.my-watts/` (Unix)<br>`%USERPROFILE%\.my-watts\` (Windows) |
+| `analyze` | `index.json` — ride index (updated automatically)<br>`{input}.gpx` — copy of the analyzed GPX | `~/.my-watts/` (Unix)<br>`%USERPROFILE%\.my-watts\` (Windows)<br>GPX copy in `~/.my-watts/gpx/` |
 | `list`    | _(none)_ — interactive table of indexed rides; Enter re-opens a ride's plot | reads `~/.my-watts/index.json` |
+| `reindex` | `index.json` — rebuilt from scratch out of `~/.my-watts/gpx/` + config | `~/.my-watts/` (Unix)<br>`%USERPROFILE%\.my-watts\` (Windows) |
 
 All CSV column definitions live in [SPEC.md](SPEC.md).
 
