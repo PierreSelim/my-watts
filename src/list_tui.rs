@@ -28,6 +28,12 @@ const HEADERS: [&str; 8] = [
 
 const COLUMN_WIDTHS: [u16; 8] = [16, 26, 8, 9, 9, 7, 7, 7];
 
+/// Turn a stored stem into a human-friendly ride name for display:
+/// drop a trailing `.gpx` and show underscores as spaces.
+fn display_name(stem: &str) -> String {
+    stem.strip_suffix(".gpx").unwrap_or(stem).replace('_', " ")
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -41,7 +47,7 @@ fn truncate(s: &str, max: usize) -> String {
 pub fn format_row(entry: &RideEntry) -> [String; 8] {
     [
         entry.start_timestamp.format("%Y-%m-%d %H:%M").to_string(),
-        truncate(&entry.stem, 25),
+        truncate(&display_name(&entry.stem), 25),
         format!("{:.1}", entry.distance_km),
         fmt_hhmmss(entry.elapsed_secs),
         fmt_hhmmss(entry.moving_secs),
@@ -206,13 +212,19 @@ mod tests {
     fn test_format_row_columns() {
         let row = format_row(&entry("my_ride"));
         assert_eq!(row[0], "2024-06-01 08:30");
-        assert_eq!(row[1], "my_ride");
+        assert_eq!(row[1], "my ride");
         assert_eq!(row[2], "42.3");
         assert_eq!(row[3], "02:05:10");
         assert_eq!(row[4], "01:58:30");
         assert_eq!(row[5], "21.4");
         assert_eq!(row[6], "185");
         assert_eq!(row[7], "820");
+    }
+
+    #[test]
+    fn test_display_name() {
+        assert_eq!(display_name("a_b.gpx"), "a b");
+        assert_eq!(display_name("plain"), "plain");
     }
 
     #[test]
